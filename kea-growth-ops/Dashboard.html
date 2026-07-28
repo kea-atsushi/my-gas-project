@@ -119,6 +119,7 @@
         gap: 12px;
         margin-top: 12px;
       }
+      .panel-wide { grid-column: 1 / -1; }
       .panel { padding: 20px; overflow: hidden; }
       .panel h2 { margin: 0 0 16px; font-size: 18px; }
       .table-wrap { overflow-x: auto; }
@@ -235,6 +236,7 @@
 
       function render(data) {
         const m = data.metrics || {};
+        const productRows = data.products || [];
         const profit = m.contributionProfit === '' || m.contributionProfit == null
           ? '原価未設定'
           : money.format(Number(m.contributionProfit));
@@ -248,10 +250,10 @@
           metric('SEOクリック', number.format(Number(m.gscClicks || 0)), `平均順位 ${number.format(Number(m.gscPosition || 0))}`),
           metric('Merchant承認', number.format(Number(m.merchantApproved || 0)), `不承認 ${number.format(Number(m.merchantDisapproved || 0))}`),
         ].join('');
-        const products = (data.products || []).length
+        const products = productRows.length
           ? `<div class="table-wrap"><table>
               <thead><tr><th>商品</th><th>ブランド</th><th class="num">数量</th><th class="num">売上</th></tr></thead>
-              <tbody>${data.products.map(product => `
+              <tbody>${productRows.map(product => `
                 <tr>
                   <td>${escapeHtml(product.title)}</td>
                   <td>${escapeHtml(product.vendor)}</td>
@@ -260,6 +262,28 @@
                 </tr>`).join('')}</tbody>
             </table></div>`
           : '<div class="empty">商品データはまだありません。</div>';
+        const brandRows = Object.values(productRows.reduce((brands, product) => {
+          const brand = String(product.vendor || '未設定').trim() || '未設定';
+          if (!brands[brand]) {
+            brands[brand] = { brand, units: 0, revenue: 0 };
+          }
+          brands[brand].units += Number(product.units || 0);
+          brands[brand].revenue += Number(product.revenue || 0);
+          return brands;
+        }, {}))
+          .sort((a, b) => b.revenue - a.revenue || b.units - a.units)
+          .slice(0, 10);
+        const brands = brandRows.length
+          ? `<div class="table-wrap"><table>
+              <thead><tr><th>ブランド</th><th class="num">数量</th><th class="num">売上</th></tr></thead>
+              <tbody>${brandRows.map(brand => `
+                <tr>
+                  <td>${escapeHtml(brand.brand)}</td>
+                  <td class="num">${number.format(brand.units)}</td>
+                  <td class="num">${money.format(brand.revenue)}</td>
+                </tr>`).join('')}</tbody>
+            </table></div>`
+          : '<div class="empty">ブランドデータはまだありません。</div>';
         const recommendations = (data.recommendations || []).length
           ? `<div class="rec-list">${data.recommendations.map(item => `
               <article class="rec">
@@ -276,7 +300,8 @@
           <section class="metrics">${metrics}</section>
           <section class="grid">
             <article class="panel"><h2>人気商品</h2>${products}</article>
-            <article class="panel"><h2>承認待ち</h2>${recommendations}</article>
+            <article class="panel"><h2>人気ブランド</h2>${brands}</article>
+            <article class="panel panel-wide"><h2>承認待ち</h2>${recommendations}</article>
           </section>`;
         document.getElementById('status').textContent =
           `最終取得 ${data.generatedAt || '—'} / ${m.status || '—'}`;
