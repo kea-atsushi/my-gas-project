@@ -68,7 +68,7 @@ Apps Scriptの時間主導トリガーは指定時刻の前後に実行されま
 ## 出力
 
 - `Daily`: 売上、利益、ROAS、CPA、CV、CTR、CPC、GA4、Search Console、Merchant
-- `Products`: 人気商品
+- `Products`: 人気商品（ダッシュボードではブランド別にも集計）
 - `Ads`: キャンペーン別指標
 - `SearchConsole`: 検索語句とページ
 - `Merchant`: 商品承認状態と問題
