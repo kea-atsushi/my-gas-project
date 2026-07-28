@@ -83,6 +83,8 @@ const dashboard = fs.readFileSync(path.join(root, "Dashboard.html"), "utf8");
 assert.ok(dashboard.includes("@media (max-width: 430px)"));
 assert.ok(dashboard.includes("google.script.run"));
 assert.ok(dashboard.includes("貢献利益"));
+assert.ok(dashboard.includes("人気ブランド"));
+assert.ok(dashboard.includes("brandRows"));
 
 assert.equal(context.safeDivide_(100, 0), 0);
 const productAudit = context.auditShopifyProductSeo_(
@@ -131,7 +133,7 @@ console.log(
     {
       status: "passed",
       gasFiles: gasFiles.length,
-      checks: 26,
+      checks: 28,
     },
     null,
     2,
