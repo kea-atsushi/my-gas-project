@@ -1,3 +1,10 @@
+const KEA_SHEET_ROW_LIMITS = {
+  Products: 5000,
+  Ads: 5000,
+  SearchConsole: 10000,
+  Merchant: 3000,
+};
+
 function initializeSheets_(spreadsheetId) {
   const spreadsheet = SpreadsheetApp.openById(spreadsheetId);
   const names = Object.keys(KEA_REQUIRED_SHEETS);
@@ -148,6 +155,9 @@ function replacePeriodRows_(sheetName, periodEnd, rows) {
   });
   replaceSheetRows_(sheet, headers, kept.concat(rows || []));
   formatSheet_(sheet, sheetName);
+  if (KEA_SHEET_ROW_LIMITS[sheetName]) {
+    pruneSheet_(sheet, KEA_SHEET_ROW_LIMITS[sheetName]);
+  }
 }
 
 function writeSourceRows_(periodEnd, data) {
@@ -192,7 +202,7 @@ function writeSourceRows_(periodEnd, data) {
   replacePeriodRows_('Ads', periodEnd, adRows);
 
   const searchRows = data.gsc.available
-    ? data.gsc.rows.map(function (row) {
+    ? data.gsc.rows.slice(0, 2000).map(function (row) {
         return [
           periodEnd,
           row.query,
