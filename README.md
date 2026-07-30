@@ -35,6 +35,21 @@ Search Console ┘        ├→ 週次承認待ちキュー
 7. `runDailyGrowthReport(true)`を実行し、各APIの取得結果を確認します。
 8. Webアプリを「自分のみ」「自分として実行」でデプロイします。
 
+## GitHub Actionsからの配備
+
+本番コードはGitHubを正とし、`main`へマージされた内容だけを手動でApps Scriptへ反映します。対象は固定のApps Scriptプロジェクト`Kea Growth Ops`です。PRや任意ブランチから本番配備はできません。
+
+初回だけ、Apps Script所有者のGoogleアカウントで`clasp login`を行い、生成された`~/.clasprc.json`をBase64の1行へ変換します。その値をGitHub Environment `apps-script-production`のSecret `CLASPRC_JSON_B64`へ登録してください。OAuth認証情報をリポジトリ、Issue、PR、チャットへ貼らないでください。
+
+Secret登録後の配備手順:
+
+1. PRの`Validate Kea Growth Ops`が成功したことを確認して`main`へマージします。
+2. GitHubの`Actions`から`Deploy Kea Growth Ops`を開きます。
+3. ブランチ`main`、確認値`DEPLOY`を選んで実行します。
+4. Workflowが静的テストを再実行し、Apps Scriptへ全ソースを反映して不変バージョンを記録します。
+
+`clasp push --force`はApps Script側のソースをGitHubの内容で置き換えます。Apps Scriptエディタでコードを直接変更せず、変更はブランチとPRを通してください。Script Properties、初回の`setupKeaGrowthOps()`実行、Webアプリの初回デプロイは別途Apps Script上で行います。
+
 ## Script Properties
 
 | Key | 必須 | 内容 |
