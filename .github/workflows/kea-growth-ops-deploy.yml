@@ -1,0 +1,111 @@
+name: Deploy Kea Growth Ops
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "mainをKea Growth Ops本番へ反映します"
+        required: true
+        type: choice
+        options:
+          - CANCEL
+          - DEPLOY
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kea-growth-ops-production
+  cancel-in-progress: false
+
+env:
+  APPS_SCRIPT_ID: 1n5AmVYn-mNNkA9r5c_W1s11FSCTezGgFWPIh3sVScSCgKqW-Pop0kdjx
+  CLASP_VERSION: 3.3.0
+
+jobs:
+  deploy:
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm == 'DEPLOY' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: apps-script-production
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run static and syntax tests
+        run: node kea-growth-ops/tests/static-check.mjs
+
+      - name: Restore Google authorization
+        env:
+          CLASPRC_JSON_B64: ${{ secrets.CLASPRC_JSON_B64 }}
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const path = require("node:path");
+            const encoded = process.env.CLASPRC_JSON_B64;
+            if (!encoded) throw new Error("CLASPRC_JSON_B64 is not configured");
+            const raw = Buffer.from(encoded, "base64").toString("utf8");
+            const parsed = JSON.parse(raw);
+            const hasModernToken =
+              parsed.tokens && Object.keys(parsed.tokens).length > 0;
+            const hasLegacyToken =
+              parsed.token || parsed.access_token || parsed.refresh_token;
+            if (!hasModernToken && !hasLegacyToken) {
+              throw new Error("CLASPRC_JSON_B64 is not a clasp authorization file");
+            }
+            fs.writeFileSync(
+              path.join(process.env.HOME, ".clasprc.json"),
+              raw,
+              { mode: 0o600 }
+            );
+          '
+
+      - name: Configure fixed Apps Script target
+        working-directory: kea-growth-ops
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const scriptId = process.env.APPS_SCRIPT_ID;
+            if (!/^[A-Za-z0-9_-]+$/.test(scriptId)) {
+              throw new Error("Invalid Apps Script ID");
+            }
+            fs.writeFileSync(
+              ".clasp.json",
+              JSON.stringify({ scriptId, rootDir: "." }, null, 2) + "\n",
+              { mode: 0o600 }
+            );
+          '
+
+      - name: Verify Google authorization
+        run: npx --yes "@google/clasp@${CLASP_VERSION}" --json show-authorized-user >/dev/null
+
+      - name: Show files to be pushed
+        working-directory: kea-growth-ops
+        run: npx --yes "@google/clasp@${CLASP_VERSION}" show-file-status
+
+      - name: Push GitHub source to Apps Script
+        working-directory: kea-growth-ops
+        run: npx --yes "@google/clasp@${CLASP_VERSION}" push --force
+
+      - name: Record immutable Apps Script version
+        working-directory: kea-growth-ops
+        run: npx --yes "@google/clasp@${CLASP_VERSION}" create-version "GitHub ${GITHUB_SHA}"
+
+      - name: Write deployment summary
+        run: |
+          {
+            echo "### Kea Growth Ops"
+            echo "- Result: source pushed and version recorded"
+            echo "- Git commit: \`${GITHUB_SHA}\`"
+            echo "- Apps Script: https://script.google.com/home/projects/${APPS_SCRIPT_ID}/edit"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Remove temporary authorization files
+        if: always()
+        run: rm -f "${HOME}/.clasprc.json" "kea-growth-ops/.clasp.json"
