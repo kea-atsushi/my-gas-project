@@ -48,20 +48,47 @@ jobs:
           node -e '
             const fs = require("node:fs");
             const path = require("node:path");
-            const encoded = process.env.CLASPRC_JSON_B64;
-            if (!encoded) throw new Error("CLASPRC_JSON_B64 is not configured");
-            const raw = Buffer.from(encoded, "base64").toString("utf8");
-            const parsed = JSON.parse(raw);
+            const secret = process.env.CLASPRC_JSON_B64?.trim();
+            if (!secret) {
+              throw new Error("CLASPRC_JSON_B64 is not configured");
+            }
+
+            const parseJson = (value) => {
+              try {
+                return JSON.parse(value);
+              } catch {
+                return null;
+              }
+            };
+
+            let parsed = parseJson(secret);
+            if (!parsed) {
+              const decoded = Buffer.from(
+                secret.replace(/\s+/g, ""),
+                "base64"
+              ).toString("utf8");
+              parsed = parseJson(decoded);
+            }
+
+            if (!parsed || typeof parsed !== "object") {
+              throw new Error(
+                "CLASPRC_JSON_B64 must contain clasp JSON or its Base64 value"
+              );
+            }
+
             const hasModernToken =
               parsed.tokens && Object.keys(parsed.tokens).length > 0;
             const hasLegacyToken =
               parsed.token || parsed.access_token || parsed.refresh_token;
             if (!hasModernToken && !hasLegacyToken) {
-              throw new Error("CLASPRC_JSON_B64 is not a clasp authorization file");
+              throw new Error(
+                "CLASPRC_JSON_B64 is not a clasp authorization file"
+              );
             }
+
             fs.writeFileSync(
               path.join(process.env.HOME, ".clasprc.json"),
-              raw,
+              JSON.stringify(parsed, null, 2) + "\n",
               { mode: 0o600 }
             );
           '
