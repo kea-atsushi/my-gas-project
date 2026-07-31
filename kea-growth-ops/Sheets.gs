@@ -105,7 +105,7 @@ function upsertDailySnapshot_(snapshot, report, status) {
       ? ''
       : snapshot.contributionProfit,
     snapshot.roas,
-    snapshot.cpa,
+    snapshot.cpa === null ? '' : snapshot.cpa,
     snapshot.conversions,
     snapshot.ctr,
     snapshot.cpc,
