@@ -67,6 +67,7 @@ for (const required of [
   "api.openai.com/v1/responses",
   "ADS_MUTATION_MODE",
   "承認待ち",
+  "MerchantIssues",
 ]) {
   assert.ok(allSource.includes(required), `missing required behavior: ${required}`);
 }
@@ -128,12 +129,35 @@ assert.ok(
   dailyRecommendations.every((item) => item.approvalStatus === "承認待ち"),
 );
 
+const merchantIssue = context.merchantIssueDetails_({
+  type: {
+    code: "apparel_missing_brand",
+    canonicalAttribute: "n:brand",
+  },
+  severity: {
+    aggregatedSeverity: "DISAPPROVED",
+    severityPerReportingContext: [
+      {
+        reportingContext: "FREE_LISTINGS",
+        disapprovedCountries: ["JP"],
+      },
+    ],
+  },
+  resolution: "MERCHANT_ACTION",
+});
+assert.equal(merchantIssue.code, "apparel_missing_brand");
+assert.equal(merchantIssue.canonicalAttribute, "n:brand");
+assert.equal(merchantIssue.severity, "DISAPPROVED");
+assert.equal(merchantIssue.resolution, "MERCHANT_ACTION");
+assert.equal(merchantIssue.reportingContexts, "FREE_LISTINGS");
+assert.equal(merchantIssue.countries, "disapproved:JP");
+
 console.log(
   JSON.stringify(
     {
       status: "passed",
       gasFiles: gasFiles.length,
-      checks: 28,
+      checks: 34,
     },
     null,
     2,
