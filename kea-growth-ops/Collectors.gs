@@ -401,18 +401,164 @@ function collectGa4_(config, startDate, endDate) {
   };
 }
 
+function googleAdsAccountTimeZone_(config) {
+  const configuredTimeZone = String(
+    config.GOOGLE_ADS_TIME_ZONE || '',
+  ).trim();
+  if (configuredTimeZone) {
+    validateGoogleAdsTimeZone_(configuredTimeZone);
+    return configuredTimeZone;
+  }
+
+  const result = googleAdsSearch_(
+    config,
+    'SELECT customer.time_zone FROM customer LIMIT 1',
+  );
+  if (!result.available) {
+    throw new Error(
+      result.reason || 'Google Adsアカウントのタイムゾーンを取得できませんでした。',
+    );
+  }
+  const customer =
+    result.rows && result.rows[0] && result.rows[0].customer;
+  const timeZone = String(customer && customer.timeZone || '').trim();
+  if (!timeZone) {
+    throw new Error(
+      'Google Adsアカウントのタイムゾーンが空です。',
+    );
+  }
+  validateGoogleAdsTimeZone_(timeZone);
+  return timeZone;
+}
+
+function validateGoogleAdsTimeZone_(timeZone) {
+  try {
+    Utilities.formatDate(new Date(), timeZone, 'yyyy-MM-dd');
+  } catch (error) {
+    throw new Error(
+      'Google Adsアカウントのタイムゾーンが不正です: ' + timeZone,
+    );
+  }
+}
+
+function googleAdsHourSlot_(date, timeZone) {
+  const datePart = Utilities.formatDate(date, timeZone, 'yyyy-MM-dd');
+  const hour = Number(Utilities.formatDate(date, timeZone, 'H'));
+  return datePart + 'T' + ('0' + hour).slice(-2);
+}
+
+function googleAdsReportWindow_(startDate, endDate, accountTimeZone) {
+  validateGoogleAdsTimeZone_(accountTimeZone);
+  const reportStart = startOfDay_(startDate);
+  const reportEnd = startOfDay_(endDate);
+  if (reportStart.getTime() >= reportEnd.getTime()) {
+    throw new Error('Google Ads集計期間が不正です。');
+  }
+  return {
+    queryStartDate: Utilities.formatDate(
+      reportStart,
+      accountTimeZone,
+      'yyyy-MM-dd',
+    ),
+    queryEndDate: Utilities.formatDate(
+      new Date(reportEnd.getTime() - 1),
+      accountTimeZone,
+      'yyyy-MM-dd',
+    ),
+    startSlot: googleAdsHourSlot_(reportStart, accountTimeZone),
+    endSlot: googleAdsHourSlot_(reportEnd, accountTimeZone),
+  };
+}
+
+function googleAdsRowInReportWindow_(row, window) {
+  const segments = row && row.segments || {};
+  const date = String(segments.date || '');
+  const hour = Number(segments.hour);
+  if (
+    !date ||
+    !Number.isFinite(hour) ||
+    hour < 0 ||
+    hour > 23
+  ) {
+    return false;
+  }
+  const slot = date + 'T' + ('0' + hour).slice(-2);
+  return slot >= window.startSlot && slot < window.endSlot;
+}
+
+function aggregateGoogleAdsCampaignRows_(rows, window) {
+  const campaignsById = {};
+  (rows || [])
+    .filter(function (row) {
+      return googleAdsRowInReportWindow_(row, window);
+    })
+    .forEach(function (row) {
+      const campaign = row.campaign || {};
+      const id = String(campaign.id || '');
+      const key = id || String(campaign.name || '');
+      if (!key) return;
+      if (!campaignsById[key]) {
+        campaignsById[key] = {
+          id: campaign.id,
+          name: campaign.name,
+          status: campaign.status,
+          channel: campaign.advertisingChannelType,
+          impressions: 0,
+          clicks: 0,
+          cost: 0,
+          conversions: 0,
+          conversionValue: 0,
+        };
+      }
+      const item = campaignsById[key];
+      const metrics = row.metrics || {};
+      item.impressions += Number(metrics.impressions || 0);
+      item.clicks += Number(metrics.clicks || 0);
+      item.cost += microsToCurrency_(metrics.costMicros);
+      item.conversions += Number(metrics.conversions || 0);
+      item.conversionValue += Number(metrics.conversionsValue || 0);
+    });
+
+  return Object.keys(campaignsById)
+    .map(function (key) {
+      const campaign = campaignsById[key];
+      campaign.ctr = safeDivide_(
+        campaign.clicks,
+        campaign.impressions,
+      );
+      campaign.cpc = safeDivide_(campaign.cost, campaign.clicks);
+      campaign.cpa = safeDivide_(
+        campaign.cost,
+        campaign.conversions,
+      );
+      campaign.roas = safeDivide_(
+        campaign.conversionValue,
+        campaign.cost,
+      );
+      return campaign;
+    })
+    .sort(function (left, right) {
+      return right.cost - left.cost;
+    });
+}
+
 function collectGoogleAds_(config, startDate, endDate) {
-  const start = dateKey_(startDate);
-  const end = dateKey_(new Date(endDate.getTime() - 86400000));
+  const accountTimeZone = googleAdsAccountTimeZone_(config);
+  const window = googleAdsReportWindow_(
+    startDate,
+    endDate,
+    accountTimeZone,
+  );
   const campaignResult = googleAdsSearch_(
     config,
-    'SELECT campaign.id, campaign.name, campaign.status, ' +
-      'campaign.advertising_channel_type, metrics.impressions, metrics.clicks, ' +
-      'metrics.cost_micros, metrics.conversions, metrics.conversions_value ' +
+    'SELECT segments.date, segments.hour, campaign.id, campaign.name, ' +
+      'campaign.status, campaign.advertising_channel_type, ' +
+      'metrics.impressions, metrics.clicks, metrics.cost_micros, ' +
+      'metrics.conversions, metrics.conversions_value ' +
       "FROM campaign WHERE segments.date BETWEEN '" +
-      start +
+      window.queryStartDate +
       "' AND '" +
-      end +
+      window.queryEndDate +
       "' AND campaign.status != 'REMOVED' " +
       'ORDER BY metrics.cost_micros DESC',
   );
@@ -425,38 +571,25 @@ function collectGoogleAds_(config, startDate, endDate) {
       summary: emptyAdsSummary_(),
     };
   }
-  const campaigns = campaignResult.rows.map(function (row) {
-    const metrics = row.metrics || {};
-    const cost = microsToCurrency_(metrics.costMicros);
-    const clicks = Number(metrics.clicks || 0);
-    const impressions = Number(metrics.impressions || 0);
-    const conversions = Number(metrics.conversions || 0);
-    const value = Number(metrics.conversionsValue || 0);
-    return {
-      id: row.campaign && row.campaign.id,
-      name: row.campaign && row.campaign.name,
-      status: row.campaign && row.campaign.status,
-      channel: row.campaign && row.campaign.advertisingChannelType,
-      impressions: impressions,
-      clicks: clicks,
-      cost: cost,
-      conversions: conversions,
-      conversionValue: value,
-      ctr: safeDivide_(clicks, impressions),
-      cpc: safeDivide_(cost, clicks),
-      cpa: safeDivide_(cost, conversions),
-      roas: safeDivide_(value, cost),
-    };
-  });
+  const campaigns = aggregateGoogleAdsCampaignRows_(
+    campaignResult.rows,
+    window,
+  );
+
+  // 検索語句は改善候補用の参考値として、広告アカウントの日付単位で取得します。
+  const searchStart = dateKey_(startDate);
+  const searchEnd = dateKey_(
+    new Date(endDate.getTime() - 86400000),
+  );
   const searchTermResult = googleAdsSearch_(
     config,
     'SELECT search_term_view.search_term, campaign.name, ad_group.name, ' +
       'metrics.impressions, metrics.clicks, metrics.cost_micros, ' +
       'metrics.conversions, metrics.conversions_value ' +
       "FROM search_term_view WHERE segments.date BETWEEN '" +
-      start +
+      searchStart +
       "' AND '" +
-      end +
+      searchEnd +
       "' ORDER BY metrics.cost_micros DESC LIMIT 500",
   );
   const searchTerms = (searchTermResult.rows || []).map(function (row) {
@@ -490,6 +623,11 @@ function collectGoogleAds_(config, startDate, endDate) {
     campaigns: campaigns,
     searchTerms: searchTerms,
     summary: summary,
+    accountTimeZone: accountTimeZone,
+    reportWindow: {
+      startSlot: window.startSlot,
+      endSlot: window.endSlot,
+    },
   };
 }
 
