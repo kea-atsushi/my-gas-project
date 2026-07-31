@@ -97,3 +97,55 @@ function assertEqual_(actual, expected) {
 function assertTrue_(condition) {
   if (!condition) throw new Error('condition is false');
 }
+
+/**
+ * Google Ads APIの接続だけを確認します。
+ * 広告停止、入札、予算などの変更処理は行いません。
+ */
+function testGoogleAdsConnection() {
+  return withScriptLock_('testGoogleAdsConnection', function () {
+    const config = keaConfig_();
+    const requiredKeys = [
+      'GOOGLE_ADS_CUSTOMER_ID',
+      'GOOGLE_ADS_DEVELOPER_TOKEN',
+      'GOOGLE_ADS_LOGIN_CUSTOMER_ID',
+    ];
+    if (!configured_(config, requiredKeys)) {
+      throw new Error(
+        'Google Ads接続設定が不足しています: ' +
+          requiredKeys
+            .filter(function (key) {
+              return !String(config[key] || '').trim();
+            })
+            .join(', '),
+      );
+    }
+
+    const result = googleAdsSearch_(
+      config,
+      'SELECT customer.id, customer.descriptive_name, ' +
+        'customer.currency_code, customer.time_zone ' +
+        'FROM customer LIMIT 1',
+    );
+    if (!result.available) {
+      throw new Error(result.reason || 'Google Ads APIへ接続できませんでした。');
+    }
+    if (!result.rows.length || !result.rows[0].customer) {
+      throw new Error('Google Ads APIは応答しましたが、顧客情報を取得できませんでした。');
+    }
+
+    const customer = result.rows[0].customer;
+    const output = {
+      status: 'passed',
+      customerId: String(customer.id || ''),
+      accountName: String(customer.descriptiveName || ''),
+      currencyCode: String(customer.currencyCode || ''),
+      timeZone: String(customer.timeZone || ''),
+      loginCustomerId: String(config.GOOGLE_ADS_LOGIN_CUSTOMER_ID)
+        .replace(/\D/g, ''),
+      mutationMode: String(config.ADS_MUTATION_MODE || ''),
+    };
+    console.log(JSON.stringify(output, null, 2));
+    return output;
+  });
+}
