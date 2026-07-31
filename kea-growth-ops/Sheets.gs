@@ -405,6 +405,11 @@ function readDashboardData_() {
     metrics: latestDaily,
     products: products,
     recommendations: recommendations,
+    health: {
+      merchant: readLatestHealthRow_('MerchantHealth'),
+      seo: readLatestHealthRow_('SEOHealth'),
+      meo: readLatestHealthRow_('MEOHealth'),
+    },
   };
 }
 

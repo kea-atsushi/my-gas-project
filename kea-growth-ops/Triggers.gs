@@ -112,6 +112,13 @@ function runDailyGrowthReport(force) {
       upsertDailySnapshot_(snapshot, report, status);
       writeSourceRows_(snapshot.periodEnd, data);
       appendRecommendations_(recommendations);
+      const health = safeCollect_(
+        'Growth health watch',
+        function () {
+          return runGrowthHealthWatchCore_(forceRun);
+        },
+        { status: 'failed', reason: 'SEO・MEO・Merchant監視失敗' },
+      );
       const email = sendGrowthReport_(
         'daily',
         periodEnd,
@@ -126,6 +133,7 @@ function runDailyGrowthReport(force) {
         JSON.stringify({
           status: status,
           email: email,
+          healthStatus: health.status,
           missingSources: snapshot.missingSources,
         }),
       );
@@ -134,6 +142,7 @@ function runDailyGrowthReport(force) {
         snapshot: snapshot,
         recommendations: recommendations,
         email: email,
+        health: health,
       };
     } catch (error) {
       logRun_(
@@ -189,12 +198,13 @@ function runWeeklyGrowthProposal(force) {
         data.gsc,
       );
       const recommendations = buildWeeklyRecommendations_(snapshot, data);
-      const report = buildNarrative_(
-        'weekly',
-        snapshot,
-        data,
-        recommendations,
-      );
+      const report =
+        buildNarrative_(
+          'weekly',
+          snapshot,
+          data,
+          recommendations,
+        ) + buildWeeklyHealthSummary_();
       appendRecommendations_(recommendations);
       const email = sendGrowthReport_(
         'weekly',
@@ -281,7 +291,13 @@ function collectGrowthSources_(
       available: false,
       reason: '取得失敗',
       products: [],
-      summary: { total: 0, approved: 0, disapproved: 0 },
+      summary: {
+        total: 0,
+        approved: 0,
+        pending: 0,
+        disapproved: 0,
+        limited: 0,
+      },
     },
   );
   const gsc = safeCollect_(

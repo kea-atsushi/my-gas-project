@@ -181,6 +181,131 @@ function runKeaGrowthUnitTests() {
       false,
     );
   }, results);
+  test_('Merchant product increase is detected', function () {
+    const events = merchantChangeEvents_(
+      {
+        totalProducts: 12,
+        approved: 0,
+        pending: 0,
+        disapproved: 7,
+        limited: 0,
+      },
+      {
+        totalProducts: 7,
+        approved: 0,
+        pending: 0,
+        disapproved: 7,
+        limited: 0,
+      },
+    );
+    assertTrue_(events.some(function (event) {
+      return event.indexOf('商品総数 7→12') >= 0;
+    }));
+  }, results);
+  test_('Merchant approval change is detected', function () {
+    const events = merchantChangeEvents_(
+      {
+        totalProducts: 7,
+        approved: 3,
+        pending: 0,
+        disapproved: 4,
+        limited: 0,
+      },
+      {
+        totalProducts: 7,
+        approved: 0,
+        pending: 0,
+        disapproved: 7,
+        limited: 0,
+      },
+    );
+    assertTrue_(events.some(function (event) {
+      return event.indexOf('承認 0→3') >= 0;
+    }));
+  }, results);
+  test_('same Merchant state is not notified again', function () {
+    const newItems = healthNewAlertItems_(
+      [{ key: 'MERCHANT|same', text: 'same' }],
+      ['MERCHANT|same'],
+    );
+    assertEqual_(newItems.length, 0);
+  }, results);
+  test_('PENDING_PROCESSING is not an immediate action', function () {
+    assertEqual_(
+      merchantIssueNeedsAction_({ resolution: 'PENDING_PROCESSING' }),
+      false,
+    );
+  }, results);
+  test_('MERCHANT_ACTION is queued for approval', function () {
+    assertEqual_(
+      merchantIssueNeedsAction_({ resolution: 'MERCHANT_ACTION' }),
+      true,
+    );
+  }, results);
+  test_('sitemap errors create a recommendation', function () {
+    const items = seoRecommendationsFromAudit_({
+      queryRows: [],
+      pageRows: [],
+      clickChangePct: null,
+      sitemap: { errors: 2, warnings: 0 },
+      majorUrls: [],
+      oldUrls: [],
+      oldHttp: [],
+    });
+    assertTrue_(items.some(function (item) {
+      return item.category === 'sitemap';
+    }));
+  }, results);
+  test_('old EC URL is detected', function () {
+    assertEqual_(
+      isOldKeaUrl_('https://www.kea.co.jp/store/products/list.php'),
+      true,
+    );
+    assertEqual_(isOldKeaUrl_('https://store.kea.co.jp/collections/all'), false);
+  }, results);
+  test_('low CTR candidate follows threshold', function () {
+    assertEqual_(seoCtrCandidate_({ impressions: 30, ctr: 0.019 }), true);
+    assertEqual_(seoCtrCandidate_({ impressions: 29, ctr: 0.019 }), false);
+    assertEqual_(seoCtrCandidate_({ impressions: 30, ctr: 0.02 }), false);
+  }, results);
+  test_('GBP without location ID is not connected', function () {
+    const state = meoConnectionState_('', true, '');
+    assertEqual_(state.available, false);
+    assertEqual_(state.status, 'needs_setup');
+  }, results);
+  test_('GBP information difference is detected', function () {
+    const comparison = compareGbpLocation_({
+      title: 'Kea.',
+      storefrontAddress: {
+        administrativeArea: '愛知県',
+        locality: '名古屋市中区',
+        addressLines: ['大須3丁目2-1 OSビル1F'],
+      },
+      phoneNumbers: { primaryPhone: '052-242-0700' },
+      websiteUri: 'https://wrong.example/',
+      regularHours: {
+        periods: [
+          { openDay: 'SUNDAY', openTime: { hours: 11 }, closeTime: { hours: 20 } },
+          { openDay: 'MONDAY', openTime: { hours: 11 }, closeTime: { hours: 20 } },
+          { openDay: 'THURSDAY', openTime: { hours: 11 }, closeTime: { hours: 20 } },
+          { openDay: 'FRIDAY', openTime: { hours: 11 }, closeTime: { hours: 20 } },
+          { openDay: 'SATURDAY', openTime: { hours: 11 }, closeTime: { hours: 20 } },
+        ],
+      },
+    });
+    assertEqual_(comparison.websiteMatches, false);
+    assertTrue_(comparison.differences.some(function (item) {
+      return item.field === 'Webサイト';
+    }));
+  }, results);
+  test_('unanswered GBP review is detected', function () {
+    const reviews = unansweredGbpReviews_([
+      { reviewId: 'new' },
+      { reviewId: 'done', reviewReply: { comment: 'thanks' } },
+    ]);
+    assertEqual_(reviews.length, 1);
+    assertEqual_(reviews[0].reviewId, 'new');
+  }, results);
   const failed = results.filter(function (result) {
     return result.status === 'failed';
   });

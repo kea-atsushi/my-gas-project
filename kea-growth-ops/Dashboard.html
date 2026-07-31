@@ -119,6 +119,37 @@
         gap: 12px;
         margin-top: 12px;
       }
+      .health-stack {
+        display: grid;
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .health-panel {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 20px;
+        scroll-snap-align: start;
+      }
+      .health-panel h2 { margin: 0 0 16px; font-size: 20px; }
+      .health-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .health-item {
+        border: 1px solid var(--line);
+        border-radius: 13px;
+        min-height: 92px;
+        padding: 12px;
+      }
+      .health-label { color: var(--muted); font-size: 11px; }
+      .health-value {
+        font-size: 18px;
+        font-weight: 700;
+        margin-top: 10px;
+        overflow-wrap: anywhere;
+      }
       .panel-wide { grid-column: 1 / -1; }
       .panel { padding: 20px; overflow: hidden; }
       .panel h2 { margin: 0 0 16px; font-size: 18px; }
@@ -179,6 +210,7 @@
         .actions { justify-content: flex-start; }
         .status { text-align: left; }
         .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .grid { grid-template-columns: 1fr; }
       }
       @media (max-width: 430px) {
@@ -186,6 +218,11 @@
         .metrics { gap: 7px; }
         .metric { min-height: 118px; padding: 14px; }
         .panel { padding: 16px; }
+        .health-stack { scroll-snap-type: y proximity; }
+        .health-panel {
+          min-height: calc(100svh - 20px);
+          padding: 16px;
+        }
       }
     </style>
   </head>
@@ -234,8 +271,31 @@
           </article>`;
       }
 
+      function healthItem(label, value) {
+        const display = value === '' || value == null ? '未取得' : value;
+        return `<div class="health-item">
+          <div class="health-label">${escapeHtml(label)}</div>
+          <div class="health-value">${escapeHtml(display)}</div>
+        </div>`;
+      }
+
+      function parseJson(value, fallback) {
+        try { return value ? JSON.parse(value) : fallback; }
+        catch (error) { return fallback; }
+      }
+
+      function booleanLabel(value) {
+        if (value === true || value === 'TRUE') return '一致';
+        if (value === false || value === 'FALSE') return '要確認';
+        return '未取得';
+      }
+
       function render(data) {
         const m = data.metrics || {};
+        const health = data.health || {};
+        const merchantHealth = health.merchant || {};
+        const seoHealth = health.seo || {};
+        const meoHealth = health.meo || {};
         const productRows = data.products || [];
         const profit = m.contributionProfit === '' || m.contributionProfit == null
           ? '原価未設定'
@@ -295,9 +355,56 @@
                 <div class="rec-copy">${escapeHtml(item.recommendation)}</div>
               </article>`).join('')}</div>`
           : '<div class="empty">改善候補はまだありません。</div>';
+        const majorUrls = parseJson(seoHealth.majorUrlSummary, []);
+        const indexedUrls = majorUrls.filter(item => item.indexed === true).length;
+        const merchantPanel = `
+          <article class="health-panel">
+            <h2>Merchant</h2>
+            <div class="health-grid">
+              ${healthItem('商品総数', merchantHealth.totalProducts)}
+              ${healthItem('承認済み', merchantHealth.approved)}
+              ${healthItem('審査中', merchantHealth.pending)}
+              ${healthItem('不承認', merchantHealth.disapproved)}
+              ${healthItem('制限付き', merchantHealth.limited)}
+              ${healthItem('前回からの変化', merchantHealth.changeSummary)}
+              ${healthItem('上位issue', merchantHealth.topIssueCodes)}
+              ${healthItem('同期状態', merchantHealth.syncStatus)}
+            </div>
+          </article>`;
+        const seoPanel = `
+          <article class="health-panel">
+            <h2>SEO</h2>
+            <div class="health-grid">
+              ${healthItem('クリック', seoHealth.clicks)}
+              ${healthItem('表示', seoHealth.impressions)}
+              ${healthItem('CTR', seoHealth.ctr === '' || seoHealth.ctr == null ? '' : `${(Number(seoHealth.ctr) * 100).toFixed(1)}%`)}
+              ${healthItem('平均順位', seoHealth.position === '' ? '' : number.format(Number(seoHealth.position || 0)))}
+              ${healthItem('前期間比', seoHealth.clickChangePct === '' || seoHealth.clickChangePct == null ? '' : `${(Number(seoHealth.clickChangePct) * 100).toFixed(1)}%`)}
+              ${healthItem('sitemap', `エラー ${seoHealth.sitemapErrors === '' ? '未取得' : seoHealth.sitemapErrors} / 待ち ${seoHealth.sitemapPending === '' ? '未取得' : seoHealth.sitemapPending}`)}
+              ${healthItem('主要URL登録', majorUrls.length ? `${indexedUrls}/${majorUrls.length}` : '')}
+              ${healthItem('旧URL残存', seoHealth.oldUrlCount)}
+            </div>
+          </article>`;
+        const meoPanel = `
+          <article class="health-panel">
+            <h2>MEO</h2>
+            <div class="health-grid">
+              ${healthItem('API接続', meoHealth.connectionStatus)}
+              ${healthItem('店舗情報', booleanLabel(meoHealth.businessInfoMatches))}
+              ${healthItem('営業時間', booleanLabel(meoHealth.hoursMatch))}
+              ${healthItem('WebサイトURL', booleanLabel(meoHealth.websiteMatches))}
+              ${healthItem('口コミ数', meoHealth.reviewCount)}
+              ${healthItem('平均評価', meoHealth.averageRating)}
+              ${healthItem('未返信口コミ', meoHealth.unansweredReviews)}
+              ${healthItem('ローカル在庫リンク', meoHealth.localInventoryLinkStatus)}
+            </div>
+          </article>`;
         document.getElementById('content').className = '';
         document.getElementById('content').innerHTML = `
           <section class="metrics">${metrics}</section>
+          <section class="health-stack">
+            ${merchantPanel}${seoPanel}${meoPanel}
+          </section>
           <section class="grid">
             <article class="panel"><h2>人気商品</h2>${products}</article>
             <article class="panel"><h2>人気ブランド</h2>${brands}</article>

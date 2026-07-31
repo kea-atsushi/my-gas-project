@@ -27,8 +27,26 @@ const context = vm.createContext({
   Error,
   RegExp,
   Utilities: {
-    formatDate(date) {
-      return new Date(date).toISOString().replace(".000Z", "+09:00");
+    formatDate(date, timeZone, format) {
+      const parts = Object.fromEntries(
+        new Intl.DateTimeFormat("en-CA", {
+          timeZone,
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hourCycle: "h23",
+        })
+          .formatToParts(new Date(date))
+          .filter((part) => part.type !== "literal")
+          .map((part) => [part.type, part.value]),
+      );
+      const dateText = `${parts.year}-${parts.month}-${parts.day}`;
+      if (format === "yyyy-MM-dd") return dateText;
+      if (format === "H") return String(Number(parts.hour));
+      return `${dateText}T${parts.hour}:${parts.minute}:${parts.second}+09:00`;
     },
   },
 });
@@ -47,6 +65,7 @@ for (const scope of [
   "https://www.googleapis.com/auth/adwords",
   "https://www.googleapis.com/auth/content",
   "https://www.googleapis.com/auth/webmasters",
+  "https://www.googleapis.com/auth/business.manage",
 ]) {
   assert.ok(manifest.oauthScopes.includes(scope), `missing scope ${scope}`);
 }
@@ -68,6 +87,14 @@ for (const required of [
   "ADS_MUTATION_MODE",
   "承認待ち",
   "MerchantIssues",
+  "runMerchantHealthWatch",
+  "runSeoHealthAudit",
+  "runMeoHealthAudit",
+  "runGrowthHealthWatch",
+  "MerchantHealth",
+  "SEOHealth",
+  "MEOHealth",
+  "GbpConnection",
 ]) {
   assert.ok(allSource.includes(required), `missing required behavior: ${required}`);
 }
@@ -86,6 +113,13 @@ assert.ok(dashboard.includes("google.script.run"));
 assert.ok(dashboard.includes("貢献利益"));
 assert.ok(dashboard.includes("人気ブランド"));
 assert.ok(dashboard.includes("brandRows"));
+assert.ok(dashboard.includes("Merchant"));
+assert.ok(dashboard.includes("SEO"));
+assert.ok(dashboard.includes("MEO"));
+assert.ok(dashboard.includes("min-height: calc(100svh - 20px)"));
+const dashboardScript = dashboard.match(/<script>([\s\S]*?)<\/script>/);
+assert.ok(dashboardScript, "dashboard script must exist");
+new vm.Script(dashboardScript[1], { filename: "Dashboard.inline.js" });
 
 assert.equal(context.safeDivide_(100, 0), 0);
 const productAudit = context.auditShopifyProductSeo_(
@@ -152,12 +186,90 @@ assert.equal(merchantIssue.resolution, "MERCHANT_ACTION");
 assert.equal(merchantIssue.reportingContexts, "FREE_LISTINGS");
 assert.equal(merchantIssue.countries, "disapproved:JP");
 
+const merchantIncrease = context.merchantChangeEvents_(
+  {
+    totalProducts: 9,
+    approved: 0,
+    pending: 2,
+    disapproved: 7,
+    limited: 0,
+  },
+  {
+    totalProducts: 7,
+    approved: 0,
+    pending: 0,
+    disapproved: 7,
+    limited: 0,
+  },
+);
+assert.ok(merchantIncrease.some((item) => item.includes("商品総数 7→9")));
+assert.ok(merchantIncrease.some((item) => item.includes("審査中 0→2")));
+assert.equal(
+  context.healthNewAlertItems_([{ key: "same" }], ["same"]).length,
+  0,
+);
+assert.equal(
+  context.merchantIssueNeedsAction_({ resolution: "PENDING_PROCESSING" }),
+  false,
+);
+assert.equal(
+  context.merchantIssueNeedsAction_({ resolution: "MERCHANT_ACTION" }),
+  true,
+);
+assert.equal(
+  context.isOldKeaUrl_("https://www.kea.co.jp/store/products/list.php"),
+  true,
+);
+assert.equal(
+  context.seoCtrCandidate_({ impressions: 30, ctr: 0.019 }),
+  true,
+);
+assert.equal(context.meoConnectionState_("", true, "").available, false);
+assert.equal(
+  context.unansweredGbpReviews_([
+    { reviewId: "new" },
+    { reviewId: "done", reviewReply: { comment: "ok" } },
+  ]).length,
+  1,
+);
+
+const gasUnitResults = context.runKeaGrowthUnitTests();
+assert.ok(Array.isArray(gasUnitResults), "Tests.gs must return results");
+assert.equal(
+  gasUnitResults.filter((result) => result.status !== "passed").length,
+  0,
+  "Tests.gs unit tests must pass",
+);
+
+for (const handler of [
+  "runMerchantHealthWatch",
+  "runSeoHealthAudit",
+  "runMeoHealthAudit",
+  "runGrowthHealthWatch",
+]) {
+  assert.ok(
+    allSource.includes(`withScriptLock_('${handler}'`),
+    `${handler} must use LockService wrapper`,
+  );
+}
+assert.ok(
+  !allSource.includes("setupKeaGrowthOps();"),
+  "health automation must not call setupKeaGrowthOps()",
+);
+const triggerSource = fs.readFileSync(path.join(root, "Triggers.gs"), "utf8");
+assert.equal(
+  (triggerSource.match(/ScriptApp\.newTrigger\(/g) || []).length,
+  3,
+  "health monitoring must not add a duplicate trigger",
+);
+
 console.log(
   JSON.stringify(
     {
       status: "passed",
       gasFiles: gasFiles.length,
-      checks: 34,
+      checks: 61,
+      gasUnitTests: gasUnitResults.length,
     },
     null,
     2,

@@ -2,6 +2,8 @@
 
 Shopify・GA4・Google広告・Merchant Center・Search Consoleを毎日取得し、利益確認、改善候補、承認待ちキュー、スマートフォン用ダッシュボードを作るGoogle Apps Scriptです。
 
+Merchantの商品同期・承認状態、Search ConsoleのSEO、GoogleビジネスプロフィールのMEOも既存の日次処理内で監視します。状態が変わった場合だけ専用メールを送ります。
+
 ## 安全方針
 
 - Shopifyを商品・売上・公開状態の正とします。
@@ -10,6 +12,7 @@ Shopify・GA4・Google広告・Merchant Center・Search Consoleを毎日取得�
 - 原価が読めない場合、利益を確定値として表示しません。`DEFAULT_COGS_RATE`を設定した場合だけ推定します。
 - EC商品はGoogle Indexing APIの対象外です。サイトマップ送信とURL検査は自動化し、インデックス登録リクエストはSearch Console画面で行います。
 - APIキーとトークンはScript Propertiesだけに保存します。スプレッドシートやGitHubへ書きません。
+- Merchant商品、広告、GoogleビジネスプロフィールはAPIから自動変更しません。対応案はすべて`Recommendations`の「承認待ち」です。
 
 ## 構成
 
@@ -24,7 +27,11 @@ Search Console ┘        ├→ 週次承認待ちキュー
 
 新商品は1時間ごとに検出し、商品SEO監査、Merchant同期確認、サイトマップ再送信、URL検査、広告追加候補の作成まで行います。
 
+`runDailyGrowthReport`は同じLockService内で`runGrowthHealthWatchCore_`を呼びます。追加トリガーは作りません。個別の手動確認は`runMerchantHealthWatchNow()`、`runSeoHealthAuditNow()`、`runMeoHealthAuditNow()`を使います。
+
 ## 導入
+
+既存のKea Growth Opsへ更新する場合、`setupKeaGrowthOps()`は再実行しません。追加シートは日次監視の初回実行時に安全に作成されます。
 
 1. Apps Scriptでスタンドアロンプロジェクトを作成します。
 2. `kea-growth-ops`配下をclaspで反映します。
@@ -63,7 +70,10 @@ Secret登録後の配備手順:
 | `GOOGLE_ADS_LOGIN_CUSTOMER_ID` | 任意 | MCC経由時 |
 | `MERCHANT_ACCOUNT_ID` | 必須 | Merchant Center ID |
 | `MERCHANT_DATA_SOURCE_ID` | 任意 | ファイル型データソースを即時再取得する場合 |
+| `MERCHANT_SHOPIFY_CONNECTED_AT` | 任意 | Shopify接続日時。ISO 8601。未設定時は初回監視時刻から48時間を判定 |
 | `SEARCH_CONSOLE_SITE_URL` | 必須 | `sc-domain:kea.co.jp`またはURL-prefix |
+| `GBP_ACCOUNT_ID` | MEO接続時 | `GbpConnection`の候補から確認した`accounts/`形式のID |
+| `GBP_LOCATION_ID` | MEO接続時 | `GbpConnection`の候補から確認した`locations/`形式のID |
 | `OPENAI_API_KEY` | 任意 | `AI_MODE=OPENAI`時 |
 | `OPENAI_MODEL` | 任意 | 既定`gpt-5.6-luna` |
 | `AI_MODE` | 必須 | `RULES`または`OPENAI` |
@@ -80,6 +90,8 @@ Secret登録後の配備手順:
 
 Apps Scriptの時間主導トリガーは指定時刻の前後に実行されます。同時実行は`LockService`で防止し、日次・週次は成功キーで重複を防止します。
 
+SEO・MEO・Merchant監視は日次処理へ統合済みです。新しい時間主導トリガーは追加しません。状態変化がない日は専用メールを送りません。API接続失敗は2回連続した時点で1回だけ通知します。
+
 ## 出力
 
 - `Daily`: 売上、利益、ROAS、CPA、CV、CTR、CPC、GA4、Search Console、Merchant
@@ -87,6 +99,11 @@ Apps Scriptの時間主導トリガーは指定時刻の前後に実行されま
 - `Ads`: キャンペーン別指標
 - `SearchConsole`: 検索語句とページ
 - `Merchant`: 商品承認状態と問題
+- `MerchantHealth`: 商品総数、承認、審査中、不承認、制限、同期状態、前回差分
+- `MerchantIssues`: 商品・アカウントissue、重大度、解決方法、国、掲載先、解決URL、影響商品数
+- `SEOHealth`: 7日比較、デバイス、サイトマップ、主要URL、canonical、旧EC URL
+- `MEOHealth`: 店舗情報、営業時間、確認状態、口コミ、ローカル在庫リンク
+- `GbpConnection`: API接続理由、確認済みID、候補、必要な1回の手動操作
 - `Recommendations`: 停止、追加、除外語句、入札、予算、SEO、商品改善の候補
 - `ProductAutomation`: 新商品公開後の処理結果
 - `RunLog`: 成功・失敗履歴

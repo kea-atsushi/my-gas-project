@@ -1,18 +1,23 @@
 const KEA_MERCHANT_ISSUE_SHEET = 'MerchantIssues';
 const KEA_MERCHANT_ISSUE_HEADERS = [
   'checkedAt',
+  'issueLevel',
   'productId',
   'offerId',
   'title',
   'brand',
   'availability',
+  'price',
   'status',
+  'contextStatuses',
   'issueCode',
   'canonicalAttribute',
   'severity',
   'resolution',
   'reportingContexts',
   'countries',
+  'documentationUrl',
+  'affectedProducts',
   'rawIssueJson',
 ];
 
@@ -140,13 +145,14 @@ function collectMerchantIssueDiagnostics_(config) {
   let pageToken = '';
   let productCount = 0;
   let productsWithIssues = 0;
-  const rows = [];
+  const products = [];
 
   do {
     const body = {
       query:
-        'SELECT id, offer_id, title, brand, availability, ' +
-        'aggregated_reporting_context_status, item_issues FROM product_view',
+        'SELECT id, offer_id, title, brand, availability, price, channel, ' +
+        'feed_label, creation_time, aggregated_reporting_context_status, ' +
+        'status_per_reporting_context, item_issues FROM product_view',
       pageSize: 1000,
     };
     if (pageToken) body.pageToken = pageToken;
@@ -164,49 +170,291 @@ function collectMerchantIssueDiagnostics_(config) {
         : [];
       productCount += 1;
       if (itemIssues.length) productsWithIssues += 1;
-
-      const issuesForRows = itemIssues.length
-        ? itemIssues
-        : [
-            {
-              type: { code: 'NO_ITEM_ISSUES_RETURNED' },
-              severity: {},
-              resolution: '',
-            },
-          ];
-
-      issuesForRows.forEach(function (issue) {
-        const details = merchantIssueDetails_(issue);
-        rows.push([
-          checkedAt,
-          view.id || '',
-          view.offerId || '',
-          view.title || '',
-          view.brand || '',
-          view.availability || '',
-          view.aggregatedReportingContextStatus || '',
-          details.code,
-          details.canonicalAttribute,
-          details.severity,
-          details.resolution,
-          details.reportingContexts,
-          details.countries,
-          details.rawJson,
-        ]);
+      products.push({
+        id: view.id || '',
+        offerId: view.offerId || '',
+        title: view.title || '',
+        brand: view.brand || '',
+        availability: view.availability || '',
+        price: view.price || null,
+        channel: view.channel || '',
+        feedLabel: view.feedLabel || '',
+        creationTime: view.creationTime || '',
+        status: view.aggregatedReportingContextStatus || '',
+        statusPerReportingContext: Array.isArray(view.statusPerReportingContext)
+          ? view.statusPerReportingContext
+          : [],
+        itemIssues: itemIssues.map(function (issue) {
+          return Object.assign({}, merchantIssueDetails_(issue), {
+            raw: issue,
+          });
+        }),
       });
     });
 
     pageToken = response.nextPageToken || '';
   } while (pageToken);
 
+  const accountIssueResult = collectMerchantAccountIssues_(accountId);
+  const documentation = collectMerchantProductDocumentation_(
+    accountId,
+    products,
+  );
+  const rows = buildMerchantIssueRows_(
+    checkedAt,
+    products,
+    accountIssueResult.issues,
+    documentation.urls,
+  );
   return {
     accountId: accountId,
     checkedAt: checkedAt,
     productCount: productCount,
     productsWithIssues: productsWithIssues,
     issueRows: rows.length,
+    products: products,
+    accountIssues: accountIssueResult.issues,
+    accountIssueError: accountIssueResult.error,
+    documentationError: documentation.error,
     rows: rows,
   };
+}
+
+function collectMerchantAccountIssues_(accountId) {
+  const issues = [];
+  let pageToken = '';
+  try {
+    do {
+      let url =
+        'https://merchantapi.googleapis.com/accounts/v1/accounts/' +
+        accountId +
+        '/issues?language_code=ja-JP&time_zone.id=Asia%2FTokyo&page_size=1000';
+      if (pageToken) url += '&page_token=' + encodeURIComponent(pageToken);
+      const response = googleJson_(
+        url,
+        { method: 'get' },
+        'Merchant account issues',
+      );
+      (response.accountIssues || []).forEach(function (issue) {
+        issues.push(issue);
+      });
+      pageToken = response.nextPageToken || '';
+    } while (pageToken);
+    return { issues: issues, error: '' };
+  } catch (error) {
+    return {
+      issues: issues,
+      error: String(error && error.message || error),
+    };
+  }
+}
+
+function merchantResolutionProductId_(productId) {
+  const parts = String(productId || '').split('~');
+  if (String(parts[0] || '').toLowerCase() === 'online' && parts.length >= 4) {
+    parts.shift();
+  }
+  const normalized = parts.join('~');
+  if (!normalized) return '';
+  return Utilities.base64EncodeWebSafe(normalized).replace(/=+$/g, '');
+}
+
+function merchantUrlsInObject_(value, output) {
+  const urls = output || [];
+  if (typeof value === 'string') {
+    if (/^https:\/\//i.test(value) && urls.indexOf(value) < 0) {
+      urls.push(value);
+    }
+    return urls;
+  }
+  if (Array.isArray(value)) {
+    value.forEach(function (item) {
+      merchantUrlsInObject_(item, urls);
+    });
+    return urls;
+  }
+  if (value && typeof value === 'object') {
+    Object.keys(value).forEach(function (key) {
+      merchantUrlsInObject_(value[key], urls);
+    });
+  }
+  return urls;
+}
+
+function collectMerchantProductDocumentation_(accountId, products) {
+  const urlsByProductAndCode = {};
+  const errors = [];
+  const targets = (products || []).filter(function (product) {
+    return product.itemIssues.some(function (issue) {
+      return issue.resolution === 'MERCHANT_ACTION';
+    });
+  }).slice(0, 50);
+
+  targets.forEach(function (product) {
+    const encodedId = merchantResolutionProductId_(product.id);
+    if (!encodedId) return;
+    try {
+      const response = googleJson_(
+        'https://merchantapi.googleapis.com/issueresolution/v1/accounts/' +
+          accountId +
+          '/products/' + encodedId +
+          ':renderproductissues?languageCode=ja-JP&timeZone=Asia%2FTokyo',
+        {
+          method: 'post',
+          payload: {
+            contentOption: 'PRE_RENDERED_HTML',
+            userInputActionOption: 'REDIRECT_TO_MERCHANT_CENTER',
+          },
+        },
+        'Merchant product issue resolution',
+      );
+      if (product.itemIssues.length === 1) {
+        const urls = merchantUrlsInObject_(response, []);
+        if (urls.length) {
+          urlsByProductAndCode[
+            product.id + '|' + product.itemIssues[0].code
+          ] = urls[0];
+        }
+      }
+    } catch (error) {
+      errors.push(
+        product.id + ': ' + String(error && error.message || error),
+      );
+    }
+  });
+  return {
+    urls: urlsByProductAndCode,
+    error: errors.join(' | ').slice(0, 5000),
+  };
+}
+
+function merchantAccountIssueDetails_(issue) {
+  const source = issue && typeof issue === 'object' ? issue : {};
+  const contexts = [];
+  const countries = [];
+  (source.impactedDestinations || []).forEach(function (destination) {
+    if (destination.reportingContext) {
+      contexts.push(destination.reportingContext);
+    }
+    (destination.impacts || []).forEach(function (impact) {
+      if (impact.regionCode) {
+        countries.push(
+          String(impact.severity || 'IMPACT') + ':' + impact.regionCode,
+        );
+      }
+    });
+  });
+  return {
+    code: String(source.name || 'ACCOUNT_ISSUE').split('/').pop(),
+    title: String(source.title || ''),
+    severity: String(source.severity || ''),
+    reportingContexts: merchantUniqueStrings_(contexts).join(', '),
+    countries: merchantUniqueStrings_(countries).join(', '),
+    documentationUrl: String(source.documentationUri || ''),
+    detail: String(source.detail || ''),
+    rawJson: JSON.stringify(source),
+  };
+}
+
+function merchantPriceText_(price) {
+  if (!price || price.amountMicros === undefined) return '';
+  const amount = Number(price.amountMicros || 0) / 1000000;
+  return amount + ' ' + String(price.currencyCode || '');
+}
+
+function merchantContextStatuses_(product) {
+  const values = [];
+  (product.statusPerReportingContext || []).forEach(function (context) {
+    const prefix = String(context.reportingContext || 'UNKNOWN');
+    (context.approvedCountries || []).forEach(function (country) {
+      values.push(prefix + ':approved:' + country);
+    });
+    (context.pendingCountries || []).forEach(function (country) {
+      values.push(prefix + ':pending:' + country);
+    });
+    (context.disapprovedCountries || []).forEach(function (country) {
+      values.push(prefix + ':disapproved:' + country);
+    });
+  });
+  return merchantUniqueStrings_(values).join(', ');
+}
+
+function buildMerchantIssueRows_(
+  checkedAt,
+  products,
+  accountIssues,
+  documentationUrls,
+) {
+  const counts = {};
+  (products || []).forEach(function (product) {
+    product.itemIssues.forEach(function (issue) {
+      counts[issue.code] = Number(counts[issue.code] || 0) + 1;
+    });
+  });
+  const rows = [];
+  (products || []).forEach(function (product) {
+    const issues = product.itemIssues.length
+      ? product.itemIssues
+      : [
+          {
+            code: 'NO_ITEM_ISSUES_RETURNED',
+            canonicalAttribute: '',
+            severity: '',
+            resolution: '',
+            reportingContexts: '',
+            countries: '',
+            rawJson: '{}',
+          },
+        ];
+    issues.forEach(function (issue) {
+      rows.push([
+        checkedAt,
+        'product',
+        product.id,
+        product.offerId,
+        product.title,
+        product.brand,
+        product.availability,
+        merchantPriceText_(product.price),
+        product.status,
+        merchantContextStatuses_(product),
+        issue.code,
+        issue.canonicalAttribute,
+        issue.severity,
+        issue.resolution,
+        issue.reportingContexts,
+        issue.countries,
+        documentationUrls[product.id + '|' + issue.code] || '',
+        counts[issue.code] || 0,
+        issue.rawJson,
+      ]);
+    });
+  });
+  (accountIssues || []).forEach(function (issue) {
+    const details = merchantAccountIssueDetails_(issue);
+    rows.push([
+      checkedAt,
+      'account',
+      '',
+      '',
+      details.title,
+      '',
+      '',
+      '',
+      details.severity,
+      '',
+      details.code,
+      '',
+      details.severity,
+      '',
+      details.reportingContexts,
+      details.countries,
+      details.documentationUrl,
+      '',
+      details.rawJson,
+    ]);
+  });
+  return rows;
 }
 
 function writeMerchantIssueDiagnostics_(result) {
@@ -228,16 +476,17 @@ function writeMerchantIssueDiagnostics_(result) {
     .setFontColor('#ffffff')
     .setFontWeight('bold');
   sheet.setRowHeight(1, 28);
-  sheet.getRange('D:N').setWrap(true);
+  sheet.getRange('C:S').setWrap(true);
   sheet.setColumnWidth(1, 190);
-  sheet.setColumnWidth(2, 230);
-  sheet.setColumnWidth(3, 100);
-  sheet.setColumnWidth(4, 320);
-  sheet.setColumnWidth(8, 250);
-  sheet.setColumnWidth(9, 180);
-  sheet.setColumnWidth(12, 180);
-  sheet.setColumnWidth(13, 180);
-  sheet.setColumnWidth(14, 420);
+  sheet.setColumnWidth(2, 90);
+  sheet.setColumnWidth(3, 230);
+  sheet.setColumnWidth(5, 320);
+  sheet.setColumnWidth(10, 260);
+  sheet.setColumnWidth(11, 250);
+  sheet.setColumnWidth(15, 180);
+  sheet.setColumnWidth(16, 180);
+  sheet.setColumnWidth(17, 260);
+  sheet.setColumnWidth(19, 420);
 
   return {
     sheetName: KEA_MERCHANT_ISSUE_SHEET,
@@ -258,7 +507,10 @@ function refreshMerchantIssueDetailsNow() {
         checkedAt: result.checkedAt,
         products: result.productCount,
         productsWithIssues: result.productsWithIssues,
+        accountIssues: result.accountIssues.length,
         issueRows: result.issueRows,
+        accountIssueError: result.accountIssueError,
+        documentationError: result.documentationError,
         sheetName: sheet.sheetName,
         sheetUrl: sheet.sheetUrl,
       };
