@@ -12,6 +12,7 @@
     "https://www.googleapis.com/auth/adwords",
     "https://www.googleapis.com/auth/content",
     "https://www.googleapis.com/auth/webmasters",
+    "https://www.googleapis.com/auth/business.manage",
     "https://www.googleapis.com/auth/userinfo.email"
   ],
   "webapp": {

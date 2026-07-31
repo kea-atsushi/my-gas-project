@@ -651,7 +651,13 @@ function collectMerchant_(config) {
       available: false,
       reason: 'MERCHANT_ACCOUNT_ID未設定',
       products: [],
-      summary: { total: 0, approved: 0, disapproved: 0 },
+      summary: {
+        total: 0,
+        approved: 0,
+        pending: 0,
+        disapproved: 0,
+        limited: 0,
+      },
     };
   }
   const accountId = String(config.MERCHANT_ACCOUNT_ID).replace(/\D/g, '');
@@ -665,7 +671,8 @@ function collectMerchant_(config) {
     const body = {
       query:
         'SELECT id, offer_id, title, brand, availability, ' +
-        'aggregated_reporting_context_status, item_issues FROM product_view',
+        'aggregated_reporting_context_status, status_per_reporting_context, ' +
+        'item_issues FROM product_view',
       pageSize: 1000,
     };
     if (pageToken) body.pageToken = pageToken;
@@ -683,8 +690,9 @@ function collectMerchant_(config) {
         brand: view.brand || '',
         availability: view.availability || '',
         status: view.aggregatedReportingContextStatus || '',
+        statusPerReportingContext: view.statusPerReportingContext || [],
         issues: (view.itemIssues || []).map(function (issue) {
-          return issue.code || issue.title || issue.description || 'issue';
+          return merchantIssueDetails_(issue).code;
         }),
       });
     });
@@ -693,18 +701,15 @@ function collectMerchant_(config) {
   const summary = products.reduce(
     function (accumulator, product) {
       accumulator.total += 1;
-      if (
-        product.status === 'ELIGIBLE' ||
-        product.status === 'ELIGIBLE_FOR_SERVING' ||
-        product.status === 'ELIGIBLE_OR_LIMITED'
-      ) {
-        accumulator.approved += 1;
-      } else {
+      if (product.status === 'ELIGIBLE') accumulator.approved += 1;
+      if (product.status === 'PENDING') accumulator.pending += 1;
+      if (product.status === 'ELIGIBLE_LIMITED') accumulator.limited += 1;
+      if (product.status === 'NOT_ELIGIBLE_OR_DISAPPROVED') {
         accumulator.disapproved += 1;
       }
       return accumulator;
     },
-    { total: 0, approved: 0, disapproved: 0 },
+    { total: 0, approved: 0, pending: 0, disapproved: 0, limited: 0 },
   );
   return { available: true, products: products, summary: summary };
 }
