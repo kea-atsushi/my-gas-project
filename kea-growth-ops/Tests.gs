@@ -111,6 +111,16 @@ function runKeaGrowthUnitTests() {
     assertEqual_(campaigns[0].clicks, 3);
     assertEqual_(campaigns[0].cost, 3);
   }, results);
+  test_('Merchant unregistered 401 is recognized', function () {
+    assertTrue_(
+      merchantGcpRegistrationMissing_(
+        new Error(
+          'Merchant lookup failed (401): UNAUTHENTICATED: ' +
+            'GCP project is not registered with the merchant account',
+        ),
+      ),
+    );
+  }, results);
   const failed = results.filter(function (result) {
     return result.status === 'failed';
   });
@@ -221,11 +231,22 @@ function testKeaGrowthConnections() {
       }),
     ];
     const failed = checks.filter(function (check) {
-      return check.status !== 'passed';
+      return check.status === 'failed';
+    });
+    const pending = checks.filter(function (check) {
+      return check.status === 'pending';
+    });
+    const passed = checks.filter(function (check) {
+      return check.status === 'passed';
     });
     const output = {
-      status: failed.length ? 'partial' : 'passed',
-      passed: checks.length - failed.length,
+      status: failed.length
+        ? 'partial'
+        : pending.length
+          ? 'pending'
+          : 'passed',
+      passed: passed.length,
+      pending: pending.length,
       failed: failed.length,
       checks: checks,
     };
@@ -257,6 +278,16 @@ function testMerchantConnection_(config) {
   }
 
   const registration = ensureMerchantGcpRegistration_(accountId);
+  if (registration.status === 'registered_pending') {
+    return {
+      status: 'pending',
+      accountId: accountId,
+      gcpRegistration: 'registered',
+      productReport: 'retry_after_propagation',
+      message:
+        'Merchant登録は完了しました。Google側の反映後に再実行してください。',
+    };
+  }
   const report = collectMerchant_(config);
   if (!report.available) {
     throw new Error(
@@ -288,7 +319,7 @@ function ensureMerchantGcpRegistration_(accountId) {
       'Merchant GCP registration lookup',
     );
   } catch (error) {
-    if (!/(404|NOT_FOUND)/i.test(String(error && error.message || error))) {
+    if (!merchantGcpRegistrationMissing_(error)) {
       throw error;
     }
   }
@@ -328,18 +359,18 @@ function ensureMerchantGcpRegistration_(accountId) {
     );
   }
 
-  const verified = googleJson_(
-    lookupUrl,
-    { method: 'get' },
-    'Merchant GCP registration verification',
+  return { status: 'registered_pending' };
+}
+
+function merchantGcpRegistrationMissing_(error) {
+  const message = String(error && error.message || error);
+  return (
+    /(404|NOT_FOUND)/i.test(message) ||
+    (
+      /(401|UNAUTHENTICATED)/i.test(message) &&
+      /not registered with the merchant account/i.test(message)
+    )
   );
-  if (String(verified && verified.name || '') !== accountName) {
-    throw new Error(
-      'Merchant登録後の確認結果が一致しません: ' +
-        String(verified && verified.name || '結果なし'),
-    );
-  }
-  return { status: registration ? 'registered' : 'already_registered' };
 }
 
 function testShopifyConnection_(config) {
@@ -352,6 +383,7 @@ function testShopifyConnection_(config) {
     );
   }
 
+  CacheService.getScriptCache().remove('KEA_SHOPIFY_ACCESS_TOKEN');
   const scopeData = shopifyGraphql_(
     config,
     'query KeaAccessScopeList {' +
