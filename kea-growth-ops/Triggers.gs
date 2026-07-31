@@ -49,14 +49,33 @@ function withScriptLock_(handler, callback) {
   }
 }
 
+function explicitForceRequested_(force) {
+  return force === true;
+}
+
+/**
+ * Apps Script画面から日次レポートを明示的に再実行します。
+ */
+function runDailyGrowthReportNow() {
+  return runDailyGrowthReport(true);
+}
+
+/**
+ * Apps Script画面から週次候補を明示的に再実行します。
+ */
+function runWeeklyGrowthProposalNow() {
+  return runWeeklyGrowthProposal(true);
+}
+
 function runDailyGrowthReport(force) {
+  const forceRun = explicitForceRequested_(force);
   return withScriptLock_('runDailyGrowthReport', function () {
     const startedAt = new Date();
     const config = keaConfig_();
     const periodEnd = dateDaysAgo_(1);
     const runKey = 'KEA_DAILY_SUCCESS_' + dateKey_(periodEnd);
     const properties = PropertiesService.getScriptProperties();
-    if (!force && properties.getProperty(runKey)) {
+    if (!forceRun && properties.getProperty(runKey)) {
       return { status: 'skipped', reason: 'already completed' };
     }
     try {
@@ -130,6 +149,7 @@ function runDailyGrowthReport(force) {
 }
 
 function runWeeklyGrowthProposal(force) {
+  const forceRun = explicitForceRequested_(force);
   return withScriptLock_('runWeeklyGrowthProposal', function () {
     const startedAt = new Date();
     const config = keaConfig_();
@@ -142,7 +162,7 @@ function runWeeklyGrowthProposal(force) {
       );
     const runKey = 'KEA_WEEKLY_SUCCESS_' + weekKey;
     const properties = PropertiesService.getScriptProperties();
-    if (!force && properties.getProperty(runKey)) {
+    if (!forceRun && properties.getProperty(runKey)) {
       return { status: 'skipped', reason: 'already completed' };
     }
     try {

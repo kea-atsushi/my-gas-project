@@ -121,6 +121,15 @@ function runKeaGrowthUnitTests() {
       ),
     );
   }, results);
+  test_('only explicit true forces a report rerun', function () {
+    assertEqual_(explicitForceRequested_(true), true);
+    assertEqual_(explicitForceRequested_(false), false);
+    assertEqual_(explicitForceRequested_(undefined), false);
+    assertEqual_(
+      explicitForceRequested_({ triggerUid: 'time-driven-trigger' }),
+      false,
+    );
+  }, results);
   const failed = results.filter(function (result) {
     return result.status === 'failed';
   });
