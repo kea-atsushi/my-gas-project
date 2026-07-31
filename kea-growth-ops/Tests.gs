@@ -63,6 +63,54 @@ function runKeaGrowthUnitTests() {
     );
     assertEqual_(item.approvalStatus, '承認待ち');
   }, results);
+  test_('Google Ads window maps Japan day to account hours', function () {
+    const window = googleAdsReportWindow_(
+      new Date('2026-07-29T15:00:00.000Z'),
+      new Date('2026-07-30T15:00:00.000Z'),
+      'America/Los_Angeles',
+    );
+    assertEqual_(window.queryStartDate, '2026-07-29');
+    assertEqual_(window.queryEndDate, '2026-07-30');
+    assertEqual_(window.startSlot, '2026-07-29T08');
+    assertEqual_(window.endSlot, '2026-07-30T08');
+  }, results);
+  test_('Google Ads rows keep only Japan report window', function () {
+    const window = {
+      startSlot: '2026-07-29T08',
+      endSlot: '2026-07-30T08',
+    };
+    const row = function (date, hour, costMicros, clicks) {
+      return {
+        segments: { date: date, hour: hour },
+        campaign: {
+          id: '1',
+          name: 'TEST',
+          status: 'ENABLED',
+          advertisingChannelType: 'SEARCH',
+        },
+        metrics: {
+          impressions: '10',
+          clicks: String(clicks),
+          costMicros: String(costMicros),
+          conversions: '0',
+          conversionsValue: '0',
+        },
+      };
+    };
+    const campaigns = aggregateGoogleAdsCampaignRows_(
+      [
+        row('2026-07-29', 7, 99000000, 99),
+        row('2026-07-29', 8, 1000000, 2),
+        row('2026-07-30', 7, 2000000, 1),
+        row('2026-07-30', 8, 99000000, 99),
+      ],
+      window,
+    );
+    assertEqual_(campaigns.length, 1);
+    assertEqual_(campaigns[0].impressions, 20);
+    assertEqual_(campaigns[0].clicks, 3);
+    assertEqual_(campaigns[0].cost, 3);
+  }, results);
   const failed = results.filter(function (result) {
     return result.status === 'failed';
   });
