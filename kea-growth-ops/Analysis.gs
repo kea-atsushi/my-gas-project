@@ -16,7 +16,10 @@ function buildGrowthSnapshot_(periodEnd, shopify, ga4, ads, merchant, gsc) {
     adCost: adCost,
     contributionProfit: contributionProfit,
     roas: ads.available ? ads.summary.roas : 0,
-    cpa: ads.available ? ads.summary.cpa : 0,
+    cpa:
+      ads.available && Number(ads.summary.conversions || 0) > 0
+        ? ads.summary.cpa
+        : null,
     conversions: ads.available ? ads.summary.conversions : 0,
     ctr: ads.available ? ads.summary.ctr : 0,
     cpc: ads.available ? ads.summary.cpc : 0,
@@ -351,6 +354,7 @@ function buildNarrative_(cadence, snapshot, data, recommendations) {
     snapshot: snapshot,
     popularProducts: popularProducts,
     unsoldProducts: unsoldProducts,
+    catalogAvailable: Boolean(data.catalog && data.catalog.available),
     recommendations: recommendations.slice(0, 40),
   };
   const config = data.config;
@@ -362,6 +366,7 @@ function buildNarrative_(cadence, snapshot, data, recommendations) {
       '広告停止、入札、予算の変更は提案だけにし、実行したと書かないでください。',
       '構成は「結論」「数値」「人気商品・売れない商品」「広告」「SEO・Merchant」「承認が必要な提案」です。',
       '利益は原価が取得できた場合だけ確定値として扱ってください。',
+      'catalogAvailableがfalseなら売れない商品を推測せず、日次は「週次レポートで全商品カタログを確認」としてください。trueで0件なら「今回は該当商品なし」としてください。',
     ].join('\n'),
     facts,
   );
@@ -422,8 +427,14 @@ function deterministicNarrative_(cadence, facts) {
           product.totalInventory,
       );
     });
+  } else if (!facts.catalogAvailable) {
+    lines.push(
+      cadence === 'daily'
+        ? '- 週次レポートで全商品カタログを確認'
+        : '- 全商品カタログを取得できないため判定不可',
+    );
   } else {
-    lines.push('- 全商品カタログ接続後に判定');
+    lines.push('- 今回は該当商品なし');
   }
   lines.push('', '改善候補');
   if (facts.recommendations.length) {
