@@ -3,6 +3,57 @@ function runKeaGrowthUnitTests() {
   test_('safeDivide zero denominator', function () {
     assertEqual_(safeDivide_(100, 0), 0);
   }, results);
+  test_('zero conversions make CPA unavailable', function () {
+    const snapshot = buildGrowthSnapshot_(
+      new Date('2026-07-30T00:00:00.000Z'),
+      { available: false, reason: 'test' },
+      { available: false, reason: 'test' },
+      {
+        available: true,
+        summary: {
+          cost: 60,
+          roas: 0,
+          cpa: 0,
+          conversions: 0,
+          ctr: 0.043,
+          cpc: 60,
+        },
+      },
+      { available: false, reason: 'test' },
+      { available: false, reason: 'test' },
+    );
+    assertEqual_(snapshot.cpa, null);
+    assertEqual_(yen_(snapshot.cpa), '—');
+  }, results);
+  test_('daily narrative defers catalog analysis to weekly report', function () {
+    const facts = {
+      snapshot: {
+        missingSources: [],
+        shopifySales: 0,
+        shopifyOrders: 0,
+        adCost: 60,
+        roas: 0,
+        cpa: null,
+        conversions: 0,
+        ctr: 0.043,
+        cpc: 60,
+        contributionProfit: -60,
+      },
+      popularProducts: [],
+      unsoldProducts: [],
+      catalogAvailable: false,
+      recommendations: [],
+    };
+    const dailyReport = deterministicNarrative_('daily', facts);
+    assertTrue_(
+      dailyReport.indexOf('週次レポートで全商品カタログを確認') >= 0,
+    );
+    const weeklyReport = deterministicNarrative_(
+      'weekly',
+      Object.assign({}, facts, { catalogAvailable: true }),
+    );
+    assertTrue_(weeklyReport.indexOf('今回は該当商品なし') >= 0);
+  }, results);
   test_('product SEO catches missing fields', function () {
     const audit = auditShopifyProductSeo_(
       {
@@ -508,4 +559,3 @@ function testSearchConsoleConnection_(config) {
     sampledRows: (response.rows || []).length,
   };
 }
-
