@@ -197,3 +197,274 @@ function testGoogleAdsConnection() {
     return output;
   });
 }
+
+/**
+ * 未完了の外部API接続を一括確認します。
+ * Merchant CenterとGoogle Cloudプロジェクトの登録だけを行い、
+ * 商品、広告、予算、入札などのデータ変更は行いません。
+ */
+function testKeaGrowthConnections() {
+  return withScriptLock_('testKeaGrowthConnections', function () {
+    const config = keaConfig_();
+    const checks = [
+      growthConnectionCheck_('Merchant Center', function () {
+        return testMerchantConnection_(config);
+      }),
+      growthConnectionCheck_('Shopify', function () {
+        return testShopifyConnection_(config);
+      }),
+      growthConnectionCheck_('GA4', function () {
+        return testGa4Connection_(config);
+      }),
+      growthConnectionCheck_('Search Console', function () {
+        return testSearchConsoleConnection_(config);
+      }),
+    ];
+    const failed = checks.filter(function (check) {
+      return check.status !== 'passed';
+    });
+    const output = {
+      status: failed.length ? 'partial' : 'passed',
+      passed: checks.length - failed.length,
+      failed: failed.length,
+      checks: checks,
+    };
+    console.log(JSON.stringify(output, null, 2));
+    return output;
+  });
+}
+
+function growthConnectionCheck_(source, callback) {
+  try {
+    return Object.assign(
+      { source: source, status: 'passed' },
+      callback() || {},
+    );
+  } catch (error) {
+    return {
+      source: source,
+      status: 'failed',
+      message: String(error && error.message || error).slice(0, 1200),
+    };
+  }
+}
+
+function testMerchantConnection_(config) {
+  const accountId = String(config.MERCHANT_ACCOUNT_ID || '')
+    .replace(/\D/g, '');
+  if (!accountId) {
+    throw new Error('MERCHANT_ACCOUNT_IDが未設定です。');
+  }
+
+  const registration = ensureMerchantGcpRegistration_(accountId);
+  const report = collectMerchant_(config);
+  if (!report.available) {
+    throw new Error(
+      report.reason || 'Merchant Centerの商品レポートを取得できませんでした。',
+    );
+  }
+  return {
+    accountId: accountId,
+    gcpRegistration: registration.status,
+    productReport: 'passed',
+    products: report.summary.total,
+    approved: report.summary.approved,
+    disapproved: report.summary.disapproved,
+  };
+}
+
+function ensureMerchantGcpRegistration_(accountId) {
+  const accountName = 'accounts/' + accountId;
+  const registrationName = accountName + '/developerRegistration';
+  const lookupUrl =
+    'https://merchantapi.googleapis.com/accounts/v1/' +
+    'accounts:getAccountForGcpRegistration';
+  let current = null;
+
+  try {
+    current = googleJson_(
+      lookupUrl,
+      { method: 'get' },
+      'Merchant GCP registration lookup',
+    );
+  } catch (error) {
+    if (!/(404|NOT_FOUND)/i.test(String(error && error.message || error))) {
+      throw error;
+    }
+  }
+
+  if (current && current.name) {
+    if (String(current.name) !== accountName) {
+      throw new Error(
+        'このGoogle Cloudプロジェクトは別のMerchant Centerへ登録済みです: ' +
+          current.name,
+      );
+    }
+    return { status: 'already_registered' };
+  }
+
+  let registration = null;
+  try {
+    registration = googleJson_(
+      'https://merchantapi.googleapis.com/accounts/v1/' +
+        registrationName +
+        ':registerGcp',
+      { method: 'post', payload: {} },
+      'Merchant registerGcp',
+    );
+  } catch (error) {
+    if (!/(409|ALREADY_EXISTS)/i.test(String(error && error.message || error))) {
+      throw error;
+    }
+  }
+
+  if (
+    registration &&
+    registration.name &&
+    String(registration.name) !== registrationName
+  ) {
+    throw new Error(
+      'Merchant登録先が一致しません: ' + registration.name,
+    );
+  }
+
+  const verified = googleJson_(
+    lookupUrl,
+    { method: 'get' },
+    'Merchant GCP registration verification',
+  );
+  if (String(verified && verified.name || '') !== accountName) {
+    throw new Error(
+      'Merchant登録後の確認結果が一致しません: ' +
+        String(verified && verified.name || '結果なし'),
+    );
+  }
+  return { status: registration ? 'registered' : 'already_registered' };
+}
+
+function testShopifyConnection_(config) {
+  if (
+    !String(config.SHOPIFY_ADMIN_ACCESS_TOKEN || '').trim() &&
+    !configured_(config, ['SHOPIFY_CLIENT_ID', 'SHOPIFY_CLIENT_SECRET'])
+  ) {
+    throw new Error(
+      'SHOPIFY_CLIENT_ID/SHOPIFY_CLIENT_SECRETが未設定です。',
+    );
+  }
+
+  const scopeData = shopifyGraphql_(
+    config,
+    'query KeaAccessScopeList {' +
+      ' currentAppInstallation { accessScopes { handle } }' +
+      '}',
+    {},
+    'Shopify access scopes',
+  );
+  const grantedScopes = (
+    scopeData.currentAppInstallation &&
+    scopeData.currentAppInstallation.accessScopes || []
+  )
+    .map(function (scope) {
+      return String(scope.handle || '');
+    })
+    .filter(Boolean)
+    .sort();
+  const requiredScopes = [
+    'read_inventory',
+    'read_orders',
+    'read_products',
+  ];
+  const missingScopes = requiredScopes.filter(function (scope) {
+    return grantedScopes.indexOf(scope) < 0;
+  });
+  if (missingScopes.length) {
+    return {
+      status: 'failed',
+      storeDomain: String(config.SHOPIFY_STORE_DOMAIN || ''),
+      grantedScopes: grantedScopes,
+      missingScopes: missingScopes,
+      message:
+        'Shopifyアプリに必要な権限が付与されていません: ' +
+        missingScopes.join(', '),
+    };
+  }
+
+  const productData = shopifyGraphql_(
+    config,
+    'query KeaProductReadTest {' +
+      ' products(first: 1) { nodes { id } }' +
+      '}',
+    {},
+    'Shopify product read test',
+  );
+  return {
+    storeDomain: String(config.SHOPIFY_STORE_DOMAIN || ''),
+    grantedScopes: grantedScopes,
+    productRead: 'passed',
+    sampledProducts: (
+      productData.products &&
+      productData.products.nodes || []
+    ).length,
+  };
+}
+
+function testGa4Connection_(config) {
+  const propertyId = String(config.GA4_PROPERTY_ID || '').replace(/\D/g, '');
+  if (!propertyId) {
+    throw new Error('GA4_PROPERTY_IDが未設定です。');
+  }
+  const report = ga4RunReport_(config, {
+    dateRanges: [
+      {
+        startDate: dateKey_(dateDaysAgo_(7)),
+        endDate: dateKey_(dateDaysAgo_(1)),
+      },
+    ],
+    metrics: [{ name: 'sessions' }],
+    limit: '1',
+  });
+  if (!report) {
+    throw new Error('GA4 Data APIから応答がありませんでした。');
+  }
+  const sessions =
+    report.rows &&
+    report.rows[0] &&
+    report.rows[0].metricValues &&
+    report.rows[0].metricValues[0]
+      ? Number(report.rows[0].metricValues[0].value || 0)
+      : 0;
+  return {
+    propertyId: propertyId,
+    reportRead: 'passed',
+    sessionsLast7Days: sessions,
+  };
+}
+
+function testSearchConsoleConnection_(config) {
+  const siteUrl = String(config.SEARCH_CONSOLE_SITE_URL || '').trim();
+  if (!siteUrl) {
+    throw new Error('SEARCH_CONSOLE_SITE_URLが未設定です。');
+  }
+  const response = googleJson_(
+    'https://www.googleapis.com/webmasters/v3/sites/' +
+      encodeURIComponent(siteUrl) +
+      '/searchAnalytics/query',
+    {
+      method: 'post',
+      payload: {
+        startDate: dateKey_(dateDaysAgo_(9)),
+        endDate: dateKey_(dateDaysAgo_(3)),
+        dimensions: ['date'],
+        rowLimit: 1,
+        dataState: 'final',
+      },
+    },
+    'Search Console connection test',
+  );
+  return {
+    siteUrl: siteUrl,
+    reportRead: 'passed',
+    sampledRows: (response.rows || []).length,
+  };
+}
+
