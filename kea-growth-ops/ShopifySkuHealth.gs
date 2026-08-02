@@ -282,12 +282,7 @@ function buildShopifySkuAudit_(variants, checkedAt) {
       }
       optionCombinationIndexes[optionKey].push(index);
     }
-    if (
-      row.productId &&
-      row.productCode &&
-      row.issueCodes.indexOf('PRODUCT_CODE_INTERNAL') < 0 &&
-      row.issueCodes.indexOf('PRODUCT_CODE_INVALID') < 0
-    ) {
+    if (row.productId && row.productCode) {
       const productCodeKey = '$' + row.productCode;
       if (!productCodeIndexes[productCodeKey]) {
         productCodeIndexes[productCodeKey] = [];

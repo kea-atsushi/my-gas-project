@@ -380,6 +380,32 @@ function runKeaGrowthUnitTests() {
       );
     });
   }, results);
+  test_('invalid product codes are still checked for cross-product reuse', function () {
+    const variant = function (id, productId) {
+      return {
+        id: id,
+        sku: 'TEMP-' + id + '-FREE',
+        selectedOptions: [{ name: 'Title', value: 'Default Title' }],
+        product: {
+          id: productId,
+          handle: productId,
+          vendor: 'TEST',
+          title: productId,
+          status: 'ARCHIVED',
+          productCode: { value: 'INVALID/CODE' },
+        },
+      };
+    };
+    const audit = buildShopifySkuAudit_([
+      variant('invalid-code-1', 'invalid-product-a'),
+      variant('invalid-code-2', 'invalid-product-b'),
+    ]);
+    assertEqual_(audit.summary.duplicateProductCodeCount, 1);
+    audit.rows.forEach(function (row) {
+      assertTrue_(row.issueCodes.indexOf('PRODUCT_CODE_INVALID') >= 0);
+      assertTrue_(row.issueCodes.indexOf('PRODUCT_CODE_DUPLICATE') >= 0);
+    });
+  }, results);
   test_('Shopify GraphQL throttling is retried before audit failure', function () {
     const originalGraphql = shopifyGraphql_;
     const originalSleep = shopifySkuThrottleSleep_;
