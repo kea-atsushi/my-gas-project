@@ -89,6 +89,52 @@ function runKeaGrowthUnitTests() {
       productCode.issues.indexOf('PRODUCT_CODE_NORMALIZATION') >= 0,
     );
   }, results);
+  test_('CH0096S requires Chloé even when the product code is unique', function () {
+    const auditOne = function (productCode, vendor) {
+      return buildShopifySkuAudit_([
+        {
+          id: 'variant-' + productCode + '-' + vendor,
+          title: 'Default Title',
+          sku: normalizeSkuPart_(productCode) + '-FREE-ONECOLOR',
+          selectedOptions: [{ name: 'Title', value: 'Default Title' }],
+          product: {
+            id: 'product-' + productCode + '-' + vendor,
+            handle: 'test',
+            vendor: vendor,
+            title: 'TEST',
+            status: 'ACTIVE',
+            productCode: { value: productCode },
+          },
+        },
+      ]);
+    };
+    const correct = auditOne('CH0096S', 'Chlo\u00e9');
+    assertEqual_(correct.summary.expectedVendorMismatchCount, 0);
+    const decomposed = auditOne('CH0096S', 'chloe\u0301');
+    assertEqual_(decomposed.summary.expectedVendorMismatchCount, 0);
+    const fullwidthCode = auditOne('\uff43\uff48\uff10\uff10\uff19\uff16\uff53', 'CHLO\u00c9');
+    assertEqual_(fullwidthCode.summary.expectedVendorMismatchCount, 0);
+    const accentMissing = auditOne('CH0096S', 'Chloe');
+    assertEqual_(accentMissing.summary.expectedVendorMismatchCount, 1);
+    assertTrue_(
+      shopifySkuRecommendations_(accentMissing.summary).some(function (item) {
+        return item.evidence.indexOf('CH0096S') >= 0 &&
+          item.evidence.indexOf('Chlo\u00e9') >= 0;
+      }),
+    );
+    assertTrue_(
+      accentMissing.rows[0].issueCodes.indexOf(
+        'PRODUCT_CODE_EXPECTED_VENDOR_MISMATCH',
+      ) >= 0,
+    );
+    assertTrue_(
+      accentMissing.rows[0].issueCodes.indexOf(
+        'PRODUCT_CODE_BRAND_CONFLICT',
+      ) < 0,
+    );
+    const unrelatedCode = auditOne('CH0096S-X', 'select');
+    assertEqual_(unrelatedCode.summary.expectedVendorMismatchCount, 0);
+  }, results);
   test_('missing size and color options use explicit fallback values', function () {
     const options = resolveSkuSelectedOptions_([
       { name: 'Title', value: 'Default Title' },
@@ -427,6 +473,147 @@ function runKeaGrowthUnitTests() {
     } finally {
       shopifyGraphql_ = originalGraphql;
       shopifySkuThrottleSleep_ = originalSleep;
+    }
+  }, results);
+  test_('SKU audit checkpoint validates identity, age, and deadlines', function () {
+    const now = Date.parse('2026-08-02T03:00:00.000Z');
+    const identity = {
+      storeDomain: 'example.myshopify.com',
+      apiVersion: '2026-07',
+      queryVersion: KEA_SHOPIFY_SKU_QUERY_VERSION,
+      checkpointSheetId: '123',
+    };
+    const state = {
+      version: KEA_SHOPIFY_SKU_CHECKPOINT_VERSION,
+      storeDomain: identity.storeDomain,
+      apiVersion: identity.apiVersion,
+      queryVersion: identity.queryVersion,
+      checkpointSheetId: identity.checkpointSheetId,
+      startedAt: new Date(now - 60000).toISOString(),
+      runCount: 1,
+      totalVariants: 0,
+      partitionVariantCount: 0,
+      upperVariantId: '',
+      lastVariantId: '',
+      after: null,
+      idQuery: null,
+      complete: false,
+    };
+    assertEqual_(shopifySkuCheckpointCompatible_(state, identity, now), true);
+    assertEqual_(
+      shopifySkuCheckpointCompatible_(
+        Object.assign({}, state, { storeDomain: 'other.myshopify.com' }),
+        identity,
+        now,
+      ),
+      false,
+    );
+    assertEqual_(
+      shopifySkuCheckpointCompatible_(
+        Object.assign({}, state, { apiVersion: '2025-10' }),
+        identity,
+        now,
+      ),
+      false,
+    );
+    assertEqual_(
+      shopifySkuCheckpointCompatible_(
+        Object.assign({}, state, {
+          startedAt: new Date(
+            now - KEA_SHOPIFY_SKU_CHECKPOINT_TTL_MS - 1,
+          ).toISOString(),
+        }),
+        identity,
+        now,
+      ),
+      false,
+    );
+    assertEqual_(shopifySkuDeadlineReached_(100000, 15000, 84999), false);
+    assertEqual_(shopifySkuDeadlineReached_(100000, 15000, 85000), true);
+    assertTrue_(shopifySkuPublishReserveMs_(25001) >= 198000);
+    assertEqual_(
+      shopifySkuIdRangeQuery_('123', '999'),
+      'id:>123 AND id:<=999',
+    );
+    assertEqual_(
+      shopifySkuNumericIdCompare_(
+        '9007199254740993',
+        '9007199254740992',
+      ),
+      1,
+    );
+    assertEqual_(
+      validateShopifySkuCatalogPageIds_(
+        { lastVariantId: '100', upperVariantId: '300' },
+        [
+          { id: 'gid://shopify/ProductVariant/101' },
+          { id: 'gid://shopify/ProductVariant/250' },
+        ],
+      ),
+      '250',
+    );
+    let duplicateRejected = false;
+    try {
+      validateShopifySkuCatalogPageIds_(
+        { lastVariantId: '100', upperVariantId: '300' },
+        [
+          { id: 'gid://shopify/ProductVariant/101' },
+          { id: 'gid://shopify/ProductVariant/101' },
+        ],
+      );
+    } catch (error) {
+      duplicateRejected = true;
+    }
+    assertEqual_(duplicateRejected, true);
+  }, results);
+  test_('SKU audit in-progress checkpoints do not publish partial results', function () {
+    const originalCollector = collectShopifySkuCatalog_;
+    const originalWriter = writeShopifySkuAudit_;
+    let writes = 0;
+    try {
+      collectShopifySkuCatalog_ = function () {
+        return {
+          available: true,
+          inProgress: true,
+          collectionComplete: false,
+          checkpointStartedAt: '2026-08-02T12:00:00+09:00',
+          checkpointUpdatedAt: '2026-08-02T12:01:00+09:00',
+          checkpointRunCount: 2,
+          variantsCollected: 1234,
+        };
+      };
+      writeShopifySkuAudit_ = function () {
+        writes += 1;
+      };
+      const collecting = runShopifySkuAuditCore_(
+        {},
+        Date.now() + KEA_GAS_SAFE_EXECUTION_MS,
+      );
+      assertEqual_(collecting.inProgress, true);
+      assertEqual_(collecting.state, null);
+      assertEqual_(collecting.checkpoint.variantsCollected, 1234);
+      assertEqual_(collecting.recommendations.length, 0);
+      assertEqual_(writes, 0);
+
+      collectShopifySkuCatalog_ = function () {
+        return {
+          available: true,
+          inProgress: false,
+          collectionComplete: true,
+          checkpointStartedAt: '2026-08-02T12:00:00+09:00',
+          checkpointUpdatedAt: '2026-08-02T12:02:00+09:00',
+          checkpointRunCount: 3,
+          variantsCollected: 1234,
+          variants: [],
+        };
+      };
+      const waitingToBuild = runShopifySkuAuditCore_({}, Date.now());
+      assertEqual_(waitingToBuild.inProgress, true);
+      assertEqual_(waitingToBuild.checkpoint.collectionComplete, true);
+      assertEqual_(writes, 0);
+    } finally {
+      collectShopifySkuCatalog_ = originalCollector;
+      writeShopifySkuAudit_ = originalWriter;
     }
   }, results);
   test_('SKU audit sheet escapes formula-like Shopify text', function () {

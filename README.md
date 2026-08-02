@@ -4,7 +4,7 @@ Shopify・GA4・Google広告・Merchant Center・Search Consoleを毎日取得�
 
 Merchantの商品同期・承認状態、Search ConsoleのSEO、GoogleビジネスプロフィールのMEOも既存の日次処理内で監視します。状態が変わった場合だけ専用メールを送ります。
 
-Shopify SKU監査は、公開・下書き・アーカイブ・UNLISTEDを含む全バリエーションを毎日読み取ります。`custom.product_code`とサイズ・カラーの選択値から期待SKUを作り、空欄、形式違反、SKU重複、商品コード重複、商品コード欠落、option異常を`ShopifySkuAudit`へ出します。
+Shopify SKU監査は、公開・下書き・アーカイブ・UNLISTEDを含む全バリエーションを読み取ります。`custom.product_code`とサイズ・カラーの選択値から期待SKUを作り、空欄、形式違反、SKU重複、商品コード重複、既知ブランド不一致、商品コード欠落、option異常を`ShopifySkuAudit`へ出します。
 
 ## 安全方針
 
@@ -52,13 +52,17 @@ SKU監査だけを手動確認する場合は`runShopifySkuAuditNow()`を使い�
 - 商品コードや`ONE-SIZE`にハイフンが含まれるため、SKU文字列をハイフンで分割しません。
 - 商品コード、サイズ、カラーは`ShopifySkuAudit`の別列で保持します。
 - 別商品間の商品コード重複は、商品コードが不正形式・内部管理形式でも妥当性判定とは独立して検出します。
-- 商品状態の検索条件を付けず、GraphQL cursorで全variantをページングします。20,000件ごとにvariant IDの範囲を切り替え、通常connectionの25,000件上限を超える店舗でも全件取得を継続します。
-- 監査シートは必要行数を確保した一時シートへ500行ずつ書き、成功後に差し替えます。API・書込失敗時は前回の全件結果を保持します。
+- 既知規則として`CH0096S`のブランドは`Chloé`です。商品コードが別商品と重複していなくても、異なるブランドや空欄を専用issueとして検出します。アクセント記号は削除せず、Unicode正規化と大文字・小文字だけを吸収します。
+- 商品状態の検索条件を付けず、GraphQL cursorで全variantをページングします。20,000件ごとにvariant IDの範囲へ切り替えるため、Shopify connectionの25,000件上限を1つのconnectionで超えません。
+- 1回のApps Script実行ですべて取得できることは保証しません。監査開始時の最大variant IDを上限として固定し、収集は約150秒でcheckpointを作ります。実行を跨ぐときは不透明なcursorを持ち越さず、最後に永続化・検証できたvariant ID境界から、次回の日次実行または`runShopifySkuAuditNow()`で再開します。checkpointはストア、query版、7日間の有効期限を検証し、完了まで前回の監査結果・alert・recommendation・失敗回数を維持します。追加トリガーは作りません。
+- 最大variant IDは収集開始後の追加を混入させないための上限です。複数実行の途中で既存variantが削除された場合や商品コード・option・vendorが更新された場合まで、Shopify側の不変スナップショットとして固定するものではありません。本番判断前に`runShopifySkuAuditNow()`で完了させ、収集中に商品変更があった場合は`resetShopifySkuAuditCheckpointNow()`で内部checkpointだけを破棄してから再収集します。ライブ監査シートはresetで変更しません。
+- 現在の実店舗カタログ件数は、認証情報を持たないリポジトリだけからは確定できません。実行中はcheckpointの`variantsCollected`が実際の収集件数を示し、複数実行にまたがって25,000件超も継続収集します。
+- 監査データは固定の非表示stagingへ500行ずつ書き、flush後に全行を再読込して検証します。行数に比例する保守的な残り時間を満たさない場合は、上限値で見積りを切り詰めず、ライブへ触れず`in_progress`で終了します。検証後は固定backupへ既存の値・数式を保存し、spreadsheet ID・schema SHA-256・backup SHA-256を持つ`BACKUP_READY`→`PUBLISHING`→`COMMITTED`のWALを記録します。`PUBLISHING`を再読込できた場合だけ、同じ`ShopifySkuAudit` sheet IDの内容を更新します。rename/deleteによるシート差し替えや既存シートへの毎回の書式再適用は行わないため、chart、保護、書式、外部参照を維持します。途中失敗やApps Scriptの強制終了は、次回のrunKey判定やAPI取得より先に旧値・旧数式へrollbackします。
 - 監査結果は`Recommendations`へ承認待ちで追加します。Shopifyの商品は変更しません。
 
 `custom.product_code`がない商品や、正式な商品コードを判断できない商品は例外として残します。内部IDや商品ハンドルから推測しません。
 
-回帰テストでは、商品コード欠落時の同一サイズ・カラー重複、別商品間の現SKU重複、期待SKUが異なる商品の商品コード重複、`UNLISTED`、GraphQL `THROTTLED`再試行を個別に検証します。API失敗時は成功時の監査state・alert・全件シートを更新せず、失敗理由だけをScript Propertiesへ記録するため、通常の1000行prune対象にはしません。
+回帰テストでは、商品コード欠落時の同一サイズ・カラー重複、別商品間の現SKU重複、期待SKUが異なる商品の商品コード重複、`CH0096S`の期待ブランド、`UNLISTED`、GraphQL `THROTTLED`再試行、checkpointの互換性と期限、監査途中状態の非公開を個別に検証します。API失敗時は成功時の監査state・alert・全件シートを更新せず、失敗理由だけをScript Propertiesへ記録するため、通常の1000行prune対象にはしません。
 
 ## 導入
 

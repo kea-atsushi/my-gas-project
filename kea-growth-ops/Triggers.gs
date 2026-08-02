@@ -75,6 +75,7 @@ function runDailyGrowthReport(force) {
     const periodEnd = dateDaysAgo_(1);
     const runKey = 'KEA_DAILY_SUCCESS_' + dateKey_(periodEnd);
     const properties = PropertiesService.getScriptProperties();
+    recoverShopifySkuPublishBeforeAudit_();
     if (!forceRun && properties.getProperty(runKey)) {
       return { status: 'skipped', reason: 'already completed' };
     }
@@ -115,7 +116,10 @@ function runDailyGrowthReport(force) {
       const health = safeCollect_(
         'Growth health watch',
         function () {
-          return runGrowthHealthWatchCore_(forceRun);
+          return runGrowthHealthWatchCore_(
+            forceRun,
+            startedAt.getTime() + KEA_GAS_SAFE_EXECUTION_MS,
+          );
         },
         { status: 'failed', reason: 'SEO・MEO・Merchant監視失敗' },
       );

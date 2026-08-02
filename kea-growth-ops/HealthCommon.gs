@@ -99,7 +99,9 @@ function ensureHealthSheets_() {
   const spreadsheet = getDashboardSpreadsheet_();
   Object.keys(KEA_HEALTH_SHEETS).forEach(function (name) {
     let sheet = spreadsheet.getSheetByName(name);
-    if (!sheet) sheet = spreadsheet.insertSheet(name);
+    const created = !sheet;
+    if (created) sheet = spreadsheet.insertSheet(name);
+    if (name === KEA_SHOPIFY_SKU_AUDIT_SHEET && !created) return;
     ensureHeader_(sheet, KEA_HEALTH_SHEETS[name]);
     sheet
       .getRange(1, 1, 1, KEA_HEALTH_SHEETS[name].length)
@@ -226,6 +228,9 @@ function healthConnectionEvents_(source, result) {
   const properties = PropertiesService.getScriptProperties();
   const streakKey = 'KEA_HEALTH_FAILURE_STREAK_' + source;
   const currentStreak = Number(properties.getProperty(streakKey) || 0);
+  if (source === 'SHOPIFY_SKU' && result && result.inProgress) {
+    return [];
+  }
   if (result && result.available) {
     properties.deleteProperty(streakKey);
     return [];
@@ -283,6 +288,7 @@ function healthSourceEvents_(source, result) {
         ['skuFormatCount', 'SKU形式違反'],
         ['duplicateSkuCount', 'SKU重複'],
         ['duplicateProductCodeCount', '商品コード重複'],
+        ['expectedVendorMismatchCount', '期待ブランド不一致'],
         ['productCodeMissingCount', '商品コード欠落'],
         ['optionIssueCount', 'option異常'],
       ].forEach(function (definition) {
@@ -326,7 +332,10 @@ function healthSourceEvents_(source, result) {
   events.push.apply(events, healthConnectionEvents_(source, result));
 
   if (comparableState) healthWriteJsonProperty_(stateKey, comparableState);
-  if (source !== 'SHOPIFY_SKU' || (result && result.available)) {
+  if (
+    source !== 'SHOPIFY_SKU' ||
+    (result && result.available && !result.inProgress && comparableState)
+  ) {
     healthWriteJsonProperty_(
       alertKey,
       currentAlerts.map(function (item) {
@@ -460,7 +469,9 @@ function finishHealthResults_(results) {
   const events = [];
   Object.keys(results).forEach(function (source) {
     const result = results[source];
-    queueHealthRecommendations_(source, result.recommendations || []);
+    if (!(source === 'SHOPIFY_SKU' && result && result.inProgress)) {
+      queueHealthRecommendations_(source, result.recommendations || []);
+    }
     events.push.apply(events, healthSourceEvents_(source, result));
   });
   const email = sendHealthChangeNotification_(events, results);
@@ -473,14 +484,18 @@ function runGrowthHealthWatchNow() {
 
 function runGrowthHealthWatch(force) {
   const forceRun = explicitForceRequested_(force);
+  const executionDeadlineAtMs = Date.now() + KEA_GAS_SAFE_EXECUTION_MS;
   return withScriptLock_('runGrowthHealthWatch', function () {
-    return runGrowthHealthWatchCore_(forceRun);
+    return runGrowthHealthWatchCore_(forceRun, executionDeadlineAtMs);
   });
 }
 
-function runGrowthHealthWatchCore_(forceRun) {
+function runGrowthHealthWatchCore_(forceRun, executionDeadlineAtMs) {
   const startedAt = new Date();
+  const safeDeadlineAtMs = Number(executionDeadlineAtMs || 0) ||
+    startedAt.getTime() + KEA_GAS_SAFE_EXECUTION_MS;
   const properties = PropertiesService.getScriptProperties();
+  recoverShopifySkuPublishBeforeAudit_();
   const runKey = 'KEA_HEALTH_SUCCESS_' + dateKey_(new Date());
   if (!forceRun && properties.getProperty(runKey)) {
     return { status: 'skipped', reason: 'already completed' };
@@ -488,9 +503,6 @@ function runGrowthHealthWatchCore_(forceRun) {
   ensureHealthSheets_();
   const config = keaConfig_();
   const results = {};
-  results.SHOPIFY_SKU = runHealthMonitorSafely_('SHOPIFY_SKU', function () {
-    return runShopifySkuAuditCore_(config);
-  });
   results.MERCHANT = runHealthMonitorSafely_('MERCHANT', function () {
     return runMerchantHealthWatchCore_(config);
   });
@@ -499,6 +511,12 @@ function runGrowthHealthWatchCore_(forceRun) {
   });
   results.MEO = runHealthMonitorSafely_('MEO', function () {
     return runMeoHealthAuditCore_(config, results.MERCHANT);
+  });
+  results.SHOPIFY_SKU = runHealthMonitorSafely_('SHOPIFY_SKU', function () {
+    return runShopifySkuAuditCore_(
+      config,
+      safeDeadlineAtMs - KEA_HEALTH_POST_SKU_RESERVE_MS,
+    );
   });
   const finalization = finishHealthResults_(results);
   properties.setProperty(runKey, isoTimestamp_(new Date()));
@@ -535,7 +553,11 @@ function finishSingleHealthWatch_(source, result, handler, startedAt) {
   logRun_(
     startedAt,
     handler,
-    result.available ? 'success' : 'partial',
+    result.inProgress
+      ? 'in_progress'
+      : result.available
+        ? 'success'
+        : 'partial',
     JSON.stringify({
       connectionStatus: result.connectionStatus,
       changes: finalization.events.length,
