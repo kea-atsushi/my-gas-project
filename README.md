@@ -4,6 +4,8 @@ Shopify・GA4・Google広告・Merchant Center・Search Consoleを毎日取得�
 
 Merchantの商品同期・承認状態、Search ConsoleのSEO、GoogleビジネスプロフィールのMEOも既存の日次処理内で監視します。状態が変わった場合だけ専用メールを送ります。
 
+Shopify SKU監査は、公開・下書き・アーカイブ・UNLISTEDを含む全バリエーションを毎日読み取ります。`custom.product_code`とサイズ・カラーの選択値から期待SKUを作り、空欄、形式違反、SKU重複、商品コード重複、商品コード欠落、option異常を`ShopifySkuAudit`へ出します。
+
 ## 安全方針
 
 - Shopifyを商品・売上・公開状態の正とします。
@@ -13,6 +15,7 @@ Merchantの商品同期・承認状態、Search ConsoleのSEO、Googleビジネ�
 - EC商品はGoogle Indexing APIの対象外です。サイトマップ送信とURL検査は自動化し、インデックス登録リクエストはSearch Console画面で行います。
 - APIキーとトークンはScript Propertiesだけに保存します。スプレッドシートやGitHubへ書きません。
 - Merchant商品、広告、GoogleビジネスプロフィールはAPIから自動変更しません。対応案はすべて`Recommendations`の「承認待ち」です。
+- Shopify SKU監査は読み取り専用です。SKU、商品、価格、在庫を更新せず、`write_products`権限も使用しません。
 
 ## 構成
 
@@ -28,6 +31,31 @@ Search Console ┘        ├→ 週次承認待ちキュー
 新商品は1時間ごとに検出し、商品SEO監査、Merchant同期確認、サイトマップ再送信、URL検査、広告追加候補の作成まで行います。
 
 `runDailyGrowthReport`は同じLockService内で`runGrowthHealthWatchCore_`を呼びます。追加トリガーは作りません。個別の手動確認は`runMerchantHealthWatchNow()`、`runSeoHealthAuditNow()`、`runMeoHealthAuditNow()`を使います。
+
+SKU監査だけを手動確認する場合は`runShopifySkuAuditNow()`を使います。日次処理では既存のLockService内から監査コアだけを呼び、ロックを重ねません。
+
+## Shopify SKU監査
+
+期待SKUは次の順番で作ります。
+
+```text
+商品コード-サイズ-カラー
+```
+
+- 商品コードは`custom.product_code`だけを正とします。
+- サイズは`Size`、`Size Detail`、`SizeDetail`、`size_detail`、`サイズ`、`サイズ詳細`、`実寸サイズ`を認識します。
+- カラーは`Color`、`Colour`、`カラー`を認識します。
+- サイズoption自体がない商品は`FREE`です。
+- カラーoption自体がない商品は`ONECOLOR`です。
+- optionがあるのに値が空欄の場合は代替値を入れず、要確認にします。
+- 全角英数字は半角へ変換し、英字は大文字、空白は半角ハイフンへ正規化します。
+- 商品コードや`ONE-SIZE`にハイフンが含まれるため、SKU文字列をハイフンで分割しません。
+- 商品コード、サイズ、カラーは`ShopifySkuAudit`の別列で保持します。
+- 商品状態の検索条件を付けず、GraphQL cursorで全variantをページングします。20,000件ごとにvariant IDの範囲を切り替え、通常connectionの25,000件上限を超える店舗でも全件取得を継続します。
+- 監査シートは必要行数を確保した一時シートへ500行ずつ書き、成功後に差し替えます。API・書込失敗時は前回の全件結果を保持します。
+- 監査結果は`Recommendations`へ承認待ちで追加します。Shopifyの商品は変更しません。
+
+`custom.product_code`がない商品や、正式な商品コードを判断できない商品は例外として残します。内部IDや商品ハンドルから推測しません。
 
 ## 導入
 
@@ -104,6 +132,7 @@ SEO・MEO・Merchant監視は日次処理へ統合済みです。新しい時間
 - `SEOHealth`: 7日比較、デバイス、サイトマップ、主要URL、canonical、旧EC URL
 - `MEOHealth`: 店舗情報、営業時間、確認状態、口コミ、ローカル在庫リンク
 - `GbpConnection`: API接続理由、確認済みID、候補、必要な1回の手動操作
+- `ShopifySkuAudit`: 商品コード、サイズ、カラー、現在SKU、期待SKU、空欄、形式違反、重複、option異常
 - `Recommendations`: 停止、追加、除外語句、入札、予算、SEO、商品改善の候補
 - `ProductAutomation`: 新商品公開後の処理結果
 - `RunLog`: 成功・失敗履歴

@@ -72,6 +72,225 @@ function runKeaGrowthUnitTests() {
     assertTrue_(audit.issues.indexOf('ブランドなし') >= 0);
     assertTrue_(audit.issues.indexOf('SKU空欄') >= 0);
   }, results);
+  test_('SKU parts are normalized without splitting product codes', function () {
+    assertEqual_(normalizeSkuPart_(' Ｆｒｅｅ '), 'FREE');
+    assertEqual_(normalizeSkuPart_('dark navy'), 'DARK-NAVY');
+    assertEqual_(shopifyNumericGid_('gid://shopify/ProductVariant/123'), '123');
+    assertEqual_(
+      buildExpectedSku_('AB-123', 'one size', 'black'),
+      'AB-123-ONE-SIZE-BLACK',
+    );
+    const productCode = productCodeIdentity_({
+      productCode: { value: 'ａｂ １２３' },
+    });
+    assertEqual_(productCode.normalized, 'AB-123');
+    assertEqual_(productCode.valid, true);
+    assertTrue_(
+      productCode.issues.indexOf('PRODUCT_CODE_NORMALIZATION') >= 0,
+    );
+  }, results);
+  test_('missing size and color options use explicit fallback values', function () {
+    const options = resolveSkuSelectedOptions_([
+      { name: 'Title', value: 'Default Title' },
+    ]);
+    assertEqual_(options.size, 'FREE');
+    assertEqual_(options.color, 'ONECOLOR');
+    assertEqual_(options.valid, true);
+    assertEqual_(
+      buildExpectedSku_('2059242', options.size, options.color),
+      '2059242-FREE-ONECOLOR',
+    );
+  }, results);
+  test_('SKU option order follows names rather than Shopify position', function () {
+    const options = resolveSkuSelectedOptions_([
+      { name: 'Color', value: 'Black' },
+      { name: 'Size Detail', value: 'One Size' },
+    ]);
+    assertEqual_(options.size, 'ONE-SIZE');
+    assertEqual_(options.color, 'BLACK');
+    assertEqual_(options.valid, true);
+  }, results);
+  test_('blank option values are errors and not fallback values', function () {
+    const options = resolveSkuSelectedOptions_([
+      { name: 'Size', value: '' },
+      { name: 'Color', value: 'Black' },
+    ]);
+    assertEqual_(options.size, '');
+    assertEqual_(options.color, 'BLACK');
+    assertEqual_(options.valid, false);
+    assertTrue_(
+      options.issues.indexOf('SIZE_OPTION_VALUE_MISSING') >= 0,
+    );
+  }, results);
+  test_('full SKU audit separates identity and finds all issue types', function () {
+    const product = function (id, code, status) {
+      return {
+        id: 'gid://shopify/Product/' + id,
+        handle: 'product-' + id,
+        vendor: 'TEST',
+        title: 'PRODUCT ' + id,
+        status: status,
+        productCode: code === null ? null : { value: code },
+      };
+    };
+    const audit = buildShopifySkuAudit_(
+      [
+        {
+          id: 'v1',
+          title: 'M / BLACK',
+          sku: '2059242-M-BLACK',
+          selectedOptions: [
+            { name: 'Size', value: 'M' },
+            { name: 'Color', value: 'Black' },
+          ],
+          product: product('1', '2059242', 'ACTIVE'),
+        },
+        {
+          id: 'v2',
+          title: 'M / BLACK duplicate',
+          sku: '2059242-M-BLACK',
+          selectedOptions: [
+            { name: 'Color', value: 'BLACK' },
+            { name: 'Size', value: 'M' },
+          ],
+          product: product('1', '2059242', 'ACTIVE'),
+        },
+        {
+          id: 'v3',
+          title: 'FREE / BLACK',
+          sku: 'ch0096s-FREE-BLACK',
+          selectedOptions: [
+            { name: 'Size', value: 'FREE' },
+            { name: 'Color', value: 'BLACK' },
+          ],
+          product: product('2', 'CH0096S', 'DRAFT'),
+        },
+        {
+          id: 'v4',
+          title: 'Default Title',
+          sku: '',
+          selectedOptions: [{ name: 'Title', value: 'Default Title' }],
+          product: product('3', null, 'ARCHIVED'),
+        },
+        {
+          id: 'v5',
+          title: 'Default Title',
+          sku: 'PRODUCT-8325-FREE-ONECOLOR',
+          selectedOptions: [{ name: 'Title', value: 'Default Title' }],
+          product: product('4', 'product-8325', 'ACTIVE'),
+        },
+        {
+          id: 'v6',
+          title: 'COTTON',
+          sku: 'A-100-FREE-ONECOLOR',
+          selectedOptions: [{ name: 'Material', value: 'Cotton' }],
+          product: product('5', 'A-100', 'DRAFT'),
+        },
+        {
+          id: 'v7',
+          title: 'Default Title',
+          sku: 'UN-1-FREE-ONECOLOR',
+          selectedOptions: [{ name: 'Title', value: 'Default Title' }],
+          product: product('6', 'UN-1', 'UNLISTED'),
+        },
+      ],
+      '2026-08-02T12:00:00+09:00',
+    );
+    assertEqual_(audit.summary.productCount, 6);
+    assertEqual_(audit.summary.variantCount, 7);
+    assertEqual_(audit.summary.activeProductCount, 2);
+    assertEqual_(audit.summary.draftProductCount, 2);
+    assertEqual_(audit.summary.archivedProductCount, 1);
+    assertEqual_(audit.summary.unlistedProductCount, 1);
+    assertEqual_(audit.summary.skuBlankCount, 1);
+    assertEqual_(audit.summary.skuFormatCount, 1);
+    assertEqual_(audit.summary.duplicateSkuCount, 1);
+    assertEqual_(audit.summary.productCodeMissingCount, 1);
+    assertTrue_(audit.summary.optionIssueCount >= 1);
+    const lowercase = audit.rows.filter(function (row) {
+      return row.variantId === 'v3';
+    })[0];
+    assertEqual_(lowercase.productCode, 'CH0096S');
+    assertEqual_(lowercase.size, 'FREE');
+    assertEqual_(lowercase.color, 'BLACK');
+    assertEqual_(lowercase.expectedSku, 'CH0096S-FREE-BLACK');
+    assertTrue_(lowercase.issueCodes.indexOf('SKU_FORMAT') >= 0);
+    assertTrue_(
+      audit.rows[0].issueCodes.indexOf('OPTION_COMBINATION_DUPLICATE') >= 0,
+    );
+    assertTrue_(
+      audit.rows[4].issueCodes.indexOf('PRODUCT_CODE_INTERNAL') >= 0,
+    );
+    assertTrue_(
+      audit.rows[5].issueCodes.indexOf('UNSUPPORTED_OPTION') >= 0,
+    );
+  }, results);
+  test_('SKU audit classifies product, option, and cross-product duplicates', function () {
+    const product = function (id, code, vendor) {
+      return {
+        id: 'product-' + id,
+        handle: 'test-' + id,
+        vendor: vendor,
+        title: 'TEST ' + id,
+        status: 'ACTIVE',
+        productCode: code === null ? null : { value: code },
+      };
+    };
+    const optionPair = function (size, color) {
+      return [
+        { name: 'Size', value: size },
+        { name: 'Color', value: color },
+      ];
+    };
+    const audit = buildShopifySkuAudit_([
+      {
+        id: 'missing-1',
+        sku: 'TEMP-1-M-BLACK',
+        selectedOptions: optionPair('M', 'BLACK'),
+        product: product('missing', null, 'SELECT'),
+      },
+      {
+        id: 'missing-2',
+        sku: 'TEMP-2-M-BLACK',
+        selectedOptions: optionPair('M', 'BLACK'),
+        product: product('missing', null, 'SELECT'),
+      },
+      {
+        id: 'cross-1',
+        sku: 'SHARED-SKU-FREE',
+        selectedOptions: optionPair('S', 'BLACK'),
+        product: product('a', 'SAME-CODE', 'BRAND-A'),
+      },
+      {
+        id: 'cross-2',
+        sku: 'SHARED-SKU-FREE',
+        selectedOptions: optionPair('M', 'WHITE'),
+        product: product('b', 'SAME-CODE', 'BRAND-B'),
+      },
+    ]);
+    assertTrue_(
+      audit.rows[0].issueCodes.indexOf('OPTION_COMBINATION_DUPLICATE') >= 0,
+    );
+    assertTrue_(
+      audit.rows[1].issueCodes.indexOf('OPTION_COMBINATION_DUPLICATE') >= 0,
+    );
+    assertTrue_(
+      audit.rows[2].issueCodes.indexOf('CROSS_PRODUCT_SKU_DUPLICATE') >= 0,
+    );
+    assertTrue_(
+      audit.rows[3].issueCodes.indexOf('PRODUCT_CODE_DUPLICATE') >= 0,
+    );
+    assertTrue_(
+      audit.rows[3].issueCodes.indexOf('PRODUCT_CODE_BRAND_CONFLICT') >= 0,
+    );
+    assertEqual_(audit.summary.duplicateSkuCount, 1);
+    assertEqual_(audit.summary.duplicateProductCodeCount, 1);
+    assertEqual_(audit.summary.productCodeBrandConflictCount, 2);
+  }, results);
+  test_('SKU audit sheet escapes formula-like Shopify text', function () {
+    assertEqual_(shopifySkuSheetCell_('=IMPORTXML("x")'), "'=IMPORTXML(\"x\")");
+    assertEqual_(shopifySkuSheetCell_('2059242-M-BLACK'), '2059242-M-BLACK');
+  }, results);
   test_('zero-conversion spend produces highest-priority action', function () {
     const snapshot = {
       missingSources: [],

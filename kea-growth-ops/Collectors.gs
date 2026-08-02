@@ -286,6 +286,113 @@ function collectShopifyCatalog_(config) {
   return { available: true, products: products };
 }
 
+/**
+ * Shopifyの商品状態を限定せず、全バリエーションの商品識別情報を取得します。
+ * SKUは読み取り専用です。商品コードはcustom.product_codeだけを正とします。
+ */
+function collectShopifySkuCatalogPage_(config, query, variables) {
+  let lastError = null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      return shopifyGraphql_(
+        config,
+        query,
+        variables,
+        'Shopify SKU catalog',
+      );
+    } catch (error) {
+      lastError = error;
+      if (!/throttl/i.test(String(error && error.message || error))) {
+        throw error;
+      }
+      if (attempt < 4) Utilities.sleep(Math.pow(2, attempt) * 1000);
+    }
+  }
+  throw lastError;
+}
+
+function shopifyNumericGid_(gid) {
+  const match = String(gid || '').match(/\/(\d+)$/);
+  return match ? match[1] : '';
+}
+
+function collectShopifySkuCatalog_(config) {
+  if (
+    !String(config.SHOPIFY_ADMIN_ACCESS_TOKEN || '').trim() &&
+    !configured_(config, ['SHOPIFY_CLIENT_ID', 'SHOPIFY_CLIENT_SECRET'])
+  ) {
+    throw new Error('Shopify Admin API設定未完了');
+  }
+
+  let after = null;
+  let idQuery = null;
+  let hasMore = true;
+  let partitionVariantCount = 0;
+  const variants = [];
+  const productIds = {};
+  const variantIds = {};
+  const partitionSize = 20000;
+  const query =
+    'query KeaShopifySkuCatalog($after: String, $query: String) {' +
+    ' productVariants(first: 100, after: $after, sortKey: ID, query: $query) {' +
+    '  nodes {' +
+    '   id title sku selectedOptions { name value }' +
+    '   product {' +
+    '    id title handle vendor status publishedAt' +
+    '    productCode: metafield(namespace: "custom", key: "product_code") { value }' +
+    '   }' +
+    '  }' +
+    '  pageInfo { hasNextPage endCursor }' +
+    ' }' +
+    '}';
+  while (hasMore) {
+    const data = collectShopifySkuCatalogPage_(config, query, {
+      after: after,
+      query: idQuery,
+    });
+    const connection = data.productVariants || { nodes: [], pageInfo: {} };
+    const nodes = connection.nodes || [];
+    nodes.forEach(function (variant) {
+      if (!variant.id || variantIds[variant.id]) {
+        throw new Error('Shopify SKU catalogでvariant IDの欠落・重複を検出しました。');
+      }
+      variantIds[variant.id] = true;
+      variants.push(variant);
+      partitionVariantCount += 1;
+      if (variant.product && variant.product.id) {
+        productIds[variant.product.id] = true;
+      }
+    });
+    if (connection.pageInfo && connection.pageInfo.hasNextPage) {
+      if (!nodes.length) {
+        throw new Error('Shopify SKU catalogの次ページ対象が空です。');
+      }
+      if (partitionVariantCount >= partitionSize) {
+        const lastNumericId = shopifyNumericGid_(nodes[nodes.length - 1].id);
+        if (!lastNumericId) {
+          throw new Error('Shopify variant IDからページ分割位置を取得できません。');
+        }
+        idQuery = 'id:>' + lastNumericId;
+        after = null;
+        partitionVariantCount = 0;
+        continue;
+      }
+      if (!connection.pageInfo.endCursor) {
+        throw new Error('Shopify SKU catalogのページカーソルがありません。');
+      }
+      after = connection.pageInfo.endCursor;
+    } else {
+      hasMore = false;
+    }
+  }
+
+  return {
+    available: true,
+    products: Object.keys(productIds).length,
+    variants: variants,
+  };
+}
+
 function auditShopifyProductSeo_(product, storefrontOrigin) {
   const text = String(product.descriptionHtml || '')
     .replace(/<[^>]*>/g, ' ')

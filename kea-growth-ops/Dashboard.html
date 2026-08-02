@@ -293,6 +293,7 @@
       function render(data) {
         const m = data.metrics || {};
         const health = data.health || {};
+        const shopifySkuHealth = health.shopifySku || {};
         const merchantHealth = health.merchant || {};
         const seoHealth = health.seo || {};
         const meoHealth = health.meo || {};
@@ -357,6 +358,21 @@
           : '<div class="empty">改善候補はまだありません。</div>';
         const majorUrls = parseJson(seoHealth.majorUrlSummary, []);
         const indexedUrls = majorUrls.filter(item => item.indexed === true).length;
+        const shopifySkuPanel = `
+          <article class="health-panel">
+            <h2>Shopify SKU監査</h2>
+            <div class="health-grid">
+              ${healthItem('対象商品', shopifySkuHealth.productCount)}
+              ${healthItem('バリエーション', shopifySkuHealth.variantCount)}
+              ${healthItem('要確認', shopifySkuHealth.issueVariantCount)}
+              ${healthItem('SKU空欄', shopifySkuHealth.skuBlankCount)}
+              ${healthItem('形式違反', shopifySkuHealth.skuFormatCount)}
+              ${healthItem('重複SKU', shopifySkuHealth.duplicateSkuCount)}
+              ${healthItem('重複商品コード', shopifySkuHealth.duplicateProductCodeCount)}
+              ${healthItem('商品コード欠落', shopifySkuHealth.productCodeMissingCount)}
+              ${healthItem('option異常', shopifySkuHealth.optionIssueCount)}
+            </div>
+          </article>`;
         const merchantPanel = `
           <article class="health-panel">
             <h2>Merchant</h2>
@@ -403,7 +419,7 @@
         document.getElementById('content').innerHTML = `
           <section class="metrics">${metrics}</section>
           <section class="health-stack">
-            ${merchantPanel}${seoPanel}${meoPanel}
+            ${shopifySkuPanel}${merchantPanel}${seoPanel}${meoPanel}
           </section>
           <section class="grid">
             <article class="panel"><h2>人気商品</h2>${products}</article>
