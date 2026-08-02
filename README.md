@@ -57,6 +57,8 @@ SKU監査だけを手動確認する場合は`runShopifySkuAuditNow()`を使い�
 
 `custom.product_code`がない商品や、正式な商品コードを判断できない商品は例外として残します。内部IDや商品ハンドルから推測しません。
 
+回帰テストでは、商品コード欠落時の同一サイズ・カラー重複、別商品間の現SKU重複、期待SKUが異なる商品の商品コード重複、`UNLISTED`、GraphQL `THROTTLED`再試行を個別に検証します。API失敗時は成功時の監査state・alert・全件シートを更新せず、失敗理由だけをScript Propertiesへ記録するため、通常の1000行prune対象にはしません。
+
 ## 導入
 
 既存のKea Growth Opsへ更新する場合、`setupKeaGrowthOps()`は再実行しません。追加シートは日次監視の初回実行時に安全に作成されます。

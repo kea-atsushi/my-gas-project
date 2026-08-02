@@ -305,10 +305,14 @@ function collectShopifySkuCatalogPage_(config, query, variables) {
       if (!/throttl/i.test(String(error && error.message || error))) {
         throw error;
       }
-      if (attempt < 4) Utilities.sleep(Math.pow(2, attempt) * 1000);
+      if (attempt < 4) shopifySkuThrottleSleep_(attempt);
     }
   }
   throw lastError;
+}
+
+function shopifySkuThrottleSleep_(attempt) {
+  Utilities.sleep(Math.pow(2, attempt) * 1000);
 }
 
 function shopifyNumericGid_(gid) {

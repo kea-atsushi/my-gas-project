@@ -287,6 +287,122 @@ function runKeaGrowthUnitTests() {
     assertEqual_(audit.summary.duplicateProductCodeCount, 1);
     assertEqual_(audit.summary.productCodeBrandConflictCount, 2);
   }, results);
+  test_('missing product codes do not hide duplicate size-color options', function () {
+    const product = {
+      id: 'product-missing-code',
+      handle: 'missing-code',
+      vendor: 'SELECT',
+      title: 'MISSING CODE',
+      status: 'DRAFT',
+      productCode: null,
+    };
+    const selectedOptions = [
+      { name: 'Size', value: 'M' },
+      { name: 'Color', value: 'BLACK' },
+    ];
+    const audit = buildShopifySkuAudit_([
+      {
+        id: 'missing-code-1',
+        sku: 'TEMP-1-M-BLACK',
+        selectedOptions: selectedOptions,
+        product: product,
+      },
+      {
+        id: 'missing-code-2',
+        sku: 'TEMP-2-M-BLACK',
+        selectedOptions: selectedOptions,
+        product: product,
+      },
+    ]);
+    audit.rows.forEach(function (row) {
+      assertTrue_(row.issueCodes.indexOf('PRODUCT_CODE_MISSING') >= 0);
+      assertTrue_(
+        row.issueCodes.indexOf('OPTION_COMBINATION_DUPLICATE') >= 0,
+      );
+    });
+  }, results);
+  test_('same current SKU on different products is explicitly cross-product', function () {
+    const variant = function (id, productId, code) {
+      return {
+        id: id,
+        sku: 'SAME-CURRENT-SKU',
+        selectedOptions: [{ name: 'Title', value: 'Default Title' }],
+        product: {
+          id: productId,
+          handle: productId,
+          vendor: 'TEST',
+          title: productId,
+          status: 'ACTIVE',
+          productCode: { value: code },
+        },
+      };
+    };
+    const audit = buildShopifySkuAudit_([
+      variant('cross-current-1', 'product-a', 'CODE-A'),
+      variant('cross-current-2', 'product-b', 'CODE-B'),
+    ]);
+    audit.rows.forEach(function (row) {
+      assertTrue_(row.issueCodes.indexOf('SKU_DUPLICATE') >= 0);
+      assertTrue_(
+        row.issueCodes.indexOf('CROSS_PRODUCT_SKU_DUPLICATE') >= 0,
+      );
+    });
+  }, results);
+  test_('duplicate product codes are found even when expected SKUs differ', function () {
+    const variant = function (id, productId, vendor, size, color) {
+      return {
+        id: id,
+        sku: 'SHARED-CODE-' + size + '-' + color,
+        selectedOptions: [
+          { name: 'Size', value: size },
+          { name: 'Color', value: color },
+        ],
+        product: {
+          id: productId,
+          handle: productId,
+          vendor: vendor,
+          title: productId,
+          status: 'ACTIVE',
+          productCode: { value: 'SHARED-CODE' },
+        },
+      };
+    };
+    const audit = buildShopifySkuAudit_([
+      variant('duplicate-code-1', 'product-a', 'BRAND-A', 'S', 'BLACK'),
+      variant('duplicate-code-2', 'product-b', 'BRAND-B', 'M', 'WHITE'),
+    ]);
+    assertEqual_(audit.summary.duplicateSkuCount, 0);
+    assertEqual_(audit.summary.duplicateProductCodeCount, 1);
+    audit.rows.forEach(function (row) {
+      assertTrue_(row.issueCodes.indexOf('PRODUCT_CODE_DUPLICATE') >= 0);
+      assertTrue_(
+        row.issueCodes.indexOf('PRODUCT_CODE_BRAND_CONFLICT') >= 0,
+      );
+    });
+  }, results);
+  test_('Shopify GraphQL throttling is retried before audit failure', function () {
+    const originalGraphql = shopifyGraphql_;
+    const originalSleep = shopifySkuThrottleSleep_;
+    let calls = 0;
+    let sleeps = 0;
+    try {
+      shopifyGraphql_ = function () {
+        calls += 1;
+        if (calls < 3) throw new Error('THROTTLED');
+        return { productVariants: { nodes: [] } };
+      };
+      shopifySkuThrottleSleep_ = function () {
+        sleeps += 1;
+      };
+      const page = collectShopifySkuCatalogPage_({}, 'query', {});
+      assertTrue_(!!page.productVariants);
+      assertEqual_(calls, 3);
+      assertEqual_(sleeps, 2);
+    } finally {
+      shopifyGraphql_ = originalGraphql;
+      shopifySkuThrottleSleep_ = originalSleep;
+    }
+  }, results);
   test_('SKU audit sheet escapes formula-like Shopify text', function () {
     assertEqual_(shopifySkuSheetCell_('=IMPORTXML("x")'), "'=IMPORTXML(\"x\")");
     assertEqual_(shopifySkuSheetCell_('2059242-M-BLACK'), '2059242-M-BLACK');
