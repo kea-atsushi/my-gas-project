@@ -4,7 +4,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
-const files = ['SaleBulkSupport.gs', 'SaleBulkShopify.gs', 'SaleBulk.gs'];
+const files = ['SaleBulkSupport.gs', 'SaleBulkShopify.gs', 'SaleBulkCore.gs'];
 const context = vm.createContext({
   console,
   Number,

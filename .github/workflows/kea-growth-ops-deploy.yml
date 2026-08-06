@@ -39,7 +39,9 @@ jobs:
           node-version: "22"
 
       - name: Run static and syntax tests
-        run: node kea-growth-ops/tests/static-check.mjs
+        run: |
+          node kea-growth-ops/tests/static-check.mjs
+          node kea-growth-ops/tests/sale-bulk-check.mjs
 
       - name: Restore Google authorization
         env:
