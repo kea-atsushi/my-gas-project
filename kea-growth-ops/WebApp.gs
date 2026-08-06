@@ -1,16 +1,18 @@
 function doGet(event) {
-  if (
-    event &&
-    event.parameter &&
-    event.parameter.format === 'json'
-  ) {
+  const parameters = event && event.parameter ? event.parameter : {};
+  if (parameters.format === 'json') {
     return ContentService.createTextOutput(
       JSON.stringify(readDashboardData_()),
     ).setMimeType(ContentService.MimeType.JSON);
   }
-  return HtmlService.createTemplateFromFile('Dashboard')
+
+  const page = parameters.page === 'sale' ? 'SaleBulk' : 'Dashboard';
+  const title = page === 'SaleBulk'
+    ? 'Kea. SALE一括設定'
+    : 'Kea. Growth Dashboard';
+  return HtmlService.createTemplateFromFile(page)
     .evaluate()
-    .setTitle('Kea. Growth Dashboard')
+    .setTitle(title)
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }

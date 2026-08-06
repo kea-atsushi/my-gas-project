@@ -18,4 +18,6 @@ jobs:
         with:
           node-version: "22"
       - name: Static and syntax checks
-        run: node kea-growth-ops/tests/static-check.mjs
+        run: |
+          node kea-growth-ops/tests/static-check.mjs
+          node kea-growth-ops/tests/sale-bulk-check.mjs

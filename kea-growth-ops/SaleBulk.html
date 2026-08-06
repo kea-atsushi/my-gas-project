@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    :root{--bg:#f4f3ef;--paper:#fff;--ink:#151515;--muted:#6b6b66;--line:#deddd7;--accent:#174c3c;--danger:#a14b24;--r:16px}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Yu Gothic",sans-serif;line-height:1.45}
+    button,input,select{font:inherit}.shell{width:min(920px,100%);margin:auto;padding:14px 12px 108px}
+    header{display:flex;justify-content:space-between;align-items:end;gap:12px;margin:8px 0 14px}h1{margin:0;font:500 clamp(28px,7vw,46px)/1 Georgia,serif;letter-spacing:-.03em}.eyebrow{margin:0 0 4px;color:var(--accent);font-size:11px;font-weight:800;letter-spacing:.12em}.back{color:var(--ink);font-size:13px}
+    .panel{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:10px}.controls{display:grid;grid-template-columns:1.3fr .7fr;gap:10px}.field label{display:block;color:var(--muted);font-size:11px;font-weight:700;margin:0 0 5px}.field input,.field select{width:100%;min-height:44px;border:1px solid var(--line);border-radius:11px;background:#fff;padding:0 12px;color:var(--ink)}.percent{position:relative}.percent input{padding-right:34px}.percent span{position:absolute;right:13px;bottom:12px;font-weight:700}
+    .search{display:flex;gap:8px}.search input{flex:1;min-width:0}.ghost,.primary{border-radius:999px;min-height:40px;padding:0 15px;font-weight:750;cursor:pointer}.ghost{border:1px solid var(--ink);background:transparent;color:var(--ink)}.primary{border:1px solid var(--ink);background:var(--ink);color:#fff}.ghost:disabled,.primary:disabled{opacity:.4;cursor:not-allowed}
+    .tools{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:8px 2px;color:var(--muted);font-size:12px}.tool-buttons{display:flex;gap:6px}.tool-buttons button{min-height:34px;padding:0 11px;font-size:12px}
+    .products{display:grid;gap:7px}.product{display:grid;grid-template-columns:26px 1fr auto;gap:9px;align-items:center;background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:11px;cursor:pointer}.product.selected{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}.product input{width:20px;height:20px;accent-color:var(--accent)}.title{display:block;font-weight:780;font-size:13px}.meta{display:block;color:var(--muted);font-size:11px;margin-top:2px}.price{text-align:right;font-variant-numeric:tabular-nums;font-size:12px;white-space:nowrap}.price strong,.price s{display:block}.price s{color:var(--muted);font-size:11px}.badge{display:inline-block;margin-top:5px;border-radius:999px;background:#ecece8;color:#555;padding:2px 7px;font-size:9px;font-weight:800}.badge.sale{background:#f5e9e3;color:var(--danger)}
+    .empty,.status,.result{border:1px dashed var(--line);border-radius:14px;padding:22px;text-align:center;color:var(--muted)}.result{margin-bottom:10px;white-space:pre-line}.result.success{border-style:solid;color:var(--accent);background:#edf4f1}.result.error{border-style:solid;color:var(--danger);background:#f8efeb}
+    .note{font-size:11px;color:var(--muted);margin:8px 1px 0}.sticky{position:fixed;left:0;right:0;bottom:0;background:rgba(244,243,239,.94);backdrop-filter:blur(12px);border-top:1px solid var(--line);padding:10px 12px calc(10px + env(safe-area-inset-bottom))}.sticky-inner{width:min(920px,100%);margin:auto;display:flex;align-items:center;justify-content:space-between;gap:10px}.summary{font-size:12px}.summary strong{display:block;font-size:15px}.apply{min-width:150px;min-height:48px}
+    @media(max-width:520px){.shell{padding-inline:9px}.controls{grid-template-columns:1fr 120px}.product{grid-template-columns:24px 1fr}.price{grid-column:2;text-align:left;display:flex;gap:8px}.price strong,.price s{display:inline}.search{flex-wrap:wrap}.search input{flex-basis:100%}.tool-buttons{gap:4px}.ghost{padding-inline:10px}}
+  </style>
+</head>
+<body>
+<main class="shell">
+  <header><div><p class="eyebrow">KEA. SHOPIFY</p><h1>SALE一括設定</h1></div><a class="back" href="?">ダッシュボードへ</a></header>
+  <section class="panel">
+    <div class="controls">
+      <div class="field"><label for="mode">処理</label><select id="mode"><option value="APPLY">セール開始・割引率変更</option><option value="END">セール終了</option></select></div>
+      <div class="field percent"><label for="percent">割引率</label><input id="percent" type="number" min="1" max="99" step="1" value="30" inputmode="numeric"><span>%</span></div>
+    </div>
+    <p class="note">選択商品の全サイズ・全カラーへ反映します。価格はKea.の税抜登録値から計算し、1円未満を切り捨てます。</p>
+  </section>
+  <section class="panel search"><input id="search" type="search" placeholder="商品コード・ブランド・商品名で検索"><button id="searchButton" class="ghost" type="button">検索</button><button id="resetButton" class="ghost" type="button">解除</button></section>
+  <div id="result" class="result" hidden></div>
+  <div class="tools"><span id="listStatus">商品取得中</span><div class="tool-buttons"><button id="selectVisible" class="ghost" type="button">表示中を選択</button><button id="clearSelection" class="ghost" type="button">選択解除</button></div></div>
+  <section id="products" class="products"><div class="status">Shopify商品を取得しています…</div></section>
+</main>
+<footer class="sticky"><div class="sticky-inner"><div class="summary"><span id="selectedCount">選択 0商品</span><strong id="actionSummary">0商品・30%OFF</strong></div><button id="applyButton" class="primary apply" type="button" disabled>一括反映</button></div></footer>
+<script>
+  let catalog=[];const selected=new Set();let busy=false;
+  const yen=new Intl.NumberFormat('ja-JP',{style:'currency',currency:'JPY',maximumFractionDigits:0});
+  const $=id=>document.getElementById(id);
+  const esc=value=>String(value==null?'':value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  const tax=value=>value==null?null:Math.round(Number(value)*1.1);
+  function range(min,max){if(min==null)return '価格未設定';const a=tax(min),b=tax(max);return a===b?yen.format(a):`${yen.format(a)}〜${yen.format(b)}`}
+  function visible(){const words=$('search').value.trim().toLowerCase().split(/\s+/).filter(Boolean);return words.length?catalog.filter(p=>words.every(w=>String(p.searchText||'').includes(w))):catalog}
+  function setBusy(value,text){busy=value;$('applyButton').textContent=value?(text||'処理中…'):($('mode').value==='END'?'SALEを終了':'一括反映');updateSummary()}
+  function updateSummary(){const count=selected.size,mode=$('mode').value,percent=$('percent').value;$('selectedCount').textContent=`選択 ${count}商品`;$('actionSummary').textContent=mode==='END'?`${count}商品・SALE終了`:`${count}商品・${percent||'—'}%OFF`;$('applyButton').disabled=busy||!count}
+  function render(){const rows=visible();$('listStatus').textContent=`表示 ${rows.length} / 全${catalog.length}商品`;if(!rows.length){$('products').innerHTML='<div class="empty">該当商品はありません。</div>';updateSummary();return}$('products').innerHTML=rows.map(p=>{const checked=selected.has(p.id),compare=p.compareAtMin==null?'':`<s>${esc(range(p.compareAtMin,p.compareAtMax))}</s>`;return `<label class="product ${checked?'selected':''}" data-id="${esc(p.id)}"><input type="checkbox" ${checked?'checked':''}><span><span class="title">${esc([p.vendor,p.productCode].filter(Boolean).join(' '))}</span><span class="meta">${esc(p.title)} / ${Number(p.variantCount||0)}バリエーション</span><span class="badge ${p.onSale?'sale':''}">${p.onSale?'SALE':'通常'}</span></span><span class="price">${compare}<strong>${esc(range(p.priceMin,p.priceMax))}</strong></span></label>`}).join('');updateSummary()}
+  function show(message,type){const root=$('result');root.hidden=false;root.className=`result ${type||''}`;root.textContent=message;root.scrollIntoView({behavior:'smooth',block:'center'})}
+  function load(){setBusy(true,'商品取得中…');google.script.run.withSuccessHandler(data=>{catalog=(data.products||[]).sort((a,b)=>`${a.vendor} ${a.productCode} ${a.title}`.localeCompare(`${b.vendor} ${b.productCode} ${b.title}`,'ja'));for(const id of selected)if(!catalog.some(p=>p.id===id))selected.delete(id);setBusy(false);render()}).withFailureHandler(error=>{setBusy(false);$('products').innerHTML='<div class="empty">商品取得に失敗しました。</div>';show(error.message||String(error),'error')}).getSaleProductCatalog()}
+  function apply(){if(busy||!selected.size)return;const mode=$('mode').value,percent=Number($('percent').value);if(mode==='APPLY'&&(!Number.isInteger(percent)||percent<1||percent>99)){alert('割引率は1〜99の整数で入力してください。');return}const text=mode==='END'?`${selected.size}商品のSALEを終了します。`:`${selected.size}商品を${percent}%OFFにします。`;if(!confirm(`${text}\n全サイズ・全カラーが対象です。`))return;setBusy(true,'Shopify反映中…');google.script.run.withSuccessHandler(result=>{show(`${result.message}\n商品 ${result.productCount}点 / バリエーション ${result.variantCount}件`,'success');selected.clear();setBusy(false);load()}).withFailureHandler(error=>{setBusy(false);show(error.message||String(error),'error')}).applySaleBulk({mode,discountPercent:mode==='APPLY'?percent:null,productIds:Array.from(selected)})}
+  $('products').addEventListener('change',event=>{const card=event.target.closest('[data-id]');if(!card||busy)return;const id=card.dataset.id;if(event.target.checked){if(selected.size>=100){alert('1回に選択できる商品は100点までです。');event.target.checked=false;return}selected.add(id)}else selected.delete(id);render()});
+  $('mode').addEventListener('change',()=>{const end=$('mode').value==='END';$('percent').disabled=end;$('applyButton').textContent=end?'SALEを終了':'一括反映';updateSummary()});
+  $('percent').addEventListener('input',updateSummary);$('search').addEventListener('keydown',event=>{if(event.key==='Enter')render()});$('searchButton').onclick=render;$('resetButton').onclick=()=>{$('search').value='';render()};
+  $('selectVisible').onclick=()=>{const rows=visible(),room=100-selected.size;rows.slice(0,room).forEach(p=>selected.add(p.id));if(rows.length>room)alert('上限100商品まで選択しました。');render()};$('clearSelection').onclick=()=>{selected.clear();render()};$('applyButton').onclick=apply;load();
+</script>
+</body>
+</html>
