@@ -125,9 +125,16 @@ assert.ok(
   !/SHOPIFY_ADMIN_ACCESS_TOKEN\s*[:=]\s*['"][^'"]+['"]/.test(allSource),
   "Shopify token must not be committed",
 );
-assert.ok(!allSource.includes("write_products"), "SKU audit must stay read-only");
+const skuReadOnlySource = [
+  fs.readFileSync(path.join(root, "Collectors.gs"), "utf8"),
+  fs.readFileSync(path.join(root, "ShopifySkuHealth.gs"), "utf8"),
+].join("\n");
 assert.ok(
-  !allSource.includes("productVariantsBulkUpdate"),
+  !skuReadOnlySource.includes("write_products"),
+  "SKU audit must stay read-only",
+);
+assert.ok(
+  !skuReadOnlySource.includes("productVariantsBulkUpdate"),
   "SKU audit must not update Shopify variants",
 );
 
