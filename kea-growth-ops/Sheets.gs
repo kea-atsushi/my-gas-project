@@ -406,6 +406,7 @@ function readDashboardData_() {
     products: products,
     recommendations: recommendations,
     health: {
+      shopifySku: healthReadJsonProperty_('KEA_HEALTH_STATE_SHOPIFY_SKU', {}),
       merchant: readLatestHealthRow_('MerchantHealth'),
       seo: readLatestHealthRow_('SEOHealth'),
       meo: readLatestHealthRow_('MEOHealth'),

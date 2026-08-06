@@ -72,13 +72,36 @@ const KEA_HEALTH_SHEETS = Object.freeze({
     'candidates',
     'manualAction',
   ],
+  ShopifySkuAudit: [
+    'checkedAt',
+    'connectionStatus',
+    'productId',
+    'variantId',
+    'handle',
+    'vendor',
+    'title',
+    'productStatus',
+    'publishedAt',
+    'variantTitle',
+    'rawProductCode',
+    'productCode',
+    'size',
+    'color',
+    'currentSku',
+    'expectedSku',
+    'auditStatus',
+    'issues',
+    'selectedOptions',
+  ],
 });
 
 function ensureHealthSheets_() {
   const spreadsheet = getDashboardSpreadsheet_();
   Object.keys(KEA_HEALTH_SHEETS).forEach(function (name) {
     let sheet = spreadsheet.getSheetByName(name);
-    if (!sheet) sheet = spreadsheet.insertSheet(name);
+    const created = !sheet;
+    if (created) sheet = spreadsheet.insertSheet(name);
+    if (name === KEA_SHOPIFY_SKU_AUDIT_SHEET && !created) return;
     ensureHeader_(sheet, KEA_HEALTH_SHEETS[name]);
     sheet
       .getRange(1, 1, 1, KEA_HEALTH_SHEETS[name].length)
@@ -205,6 +228,9 @@ function healthConnectionEvents_(source, result) {
   const properties = PropertiesService.getScriptProperties();
   const streakKey = 'KEA_HEALTH_FAILURE_STREAK_' + source;
   const currentStreak = Number(properties.getProperty(streakKey) || 0);
+  if (source === 'SHOPIFY_SKU' && result && result.inProgress) {
+    return [];
+  }
   if (result && result.available) {
     properties.deleteProperty(streakKey);
     return [];
@@ -228,9 +254,13 @@ function healthSourceEvents_(source, result) {
   const previousState = healthReadJsonProperty_(stateKey, null);
   const previousAlertKeys = healthReadJsonProperty_(alertKey, []);
   const currentAlerts = (result && result.notificationIssues) || [];
+  const comparableState =
+    source === 'SHOPIFY_SKU' && !(result && result.available)
+      ? null
+      : result && result.state;
   const events = [];
 
-  if (previousState && result && result.state) {
+  if (previousState && comparableState) {
     if (source === 'MERCHANT') {
       [
         ['totalProducts', '商品総数'],
@@ -239,35 +269,60 @@ function healthSourceEvents_(source, result) {
         ['disapproved', '不承認数'],
       ].forEach(function (definition) {
         const key = definition[0];
-        if (Number(previousState[key]) !== Number(result.state[key])) {
+        if (Number(previousState[key]) !== Number(comparableState[key])) {
           events.push({
             key:
-              source + '|' + key + '|' + previousState[key] + '>' + result.state[key],
+              source + '|' + key + '|' + previousState[key] + '>' + comparableState[key],
             text:
               'Merchant ' + definition[1] + ': ' +
-              previousState[key] + ' → ' + result.state[key],
+              previousState[key] + ' → ' + comparableState[key],
+          });
+        }
+      });
+    }
+    if (source === 'SHOPIFY_SKU') {
+      [
+        ['variantCount', '対象バリエーション'],
+        ['issueVariantCount', '要確認'],
+        ['skuBlankCount', 'SKU空欄'],
+        ['skuFormatCount', 'SKU形式違反'],
+        ['duplicateSkuCount', 'SKU重複'],
+        ['duplicateProductCodeCount', '商品コード重複'],
+        ['expectedVendorMismatchCount', '期待ブランド不一致'],
+        ['productCodeMissingCount', '商品コード欠落'],
+        ['optionIssueCount', 'option異常'],
+      ].forEach(function (definition) {
+        const key = definition[0];
+        if (Number(previousState[key]) !== Number(comparableState[key])) {
+          events.push({
+            key:
+              source + '|' + key + '|' + previousState[key] + '>' +
+              comparableState[key],
+            text:
+              'Shopify SKU ' + definition[1] + ': ' +
+              previousState[key] + ' → ' + comparableState[key],
           });
         }
       });
     }
     if (
       source === 'SEO' &&
-      result.state.oldUrlCount !== null &&
+      comparableState.oldUrlCount !== null &&
       previousState.oldUrlCount !== null &&
-      Number(result.state.oldUrlCount) > Number(previousState.oldUrlCount)
+      Number(comparableState.oldUrlCount) > Number(previousState.oldUrlCount)
     ) {
       events.push({
         key:
           source + '|old-url-increase|' + previousState.oldUrlCount + '>' +
-          result.state.oldUrlCount,
+          comparableState.oldUrlCount,
         text:
           '旧EC URLの検索残存: ' + previousState.oldUrlCount + ' → ' +
-          result.state.oldUrlCount,
+          comparableState.oldUrlCount,
       });
     }
   }
 
-  if (previousState) {
+  if (previousState && comparableState) {
     healthNewAlertItems_(currentAlerts, previousAlertKeys).forEach(
       function (item) {
         events.push(item);
@@ -276,13 +331,18 @@ function healthSourceEvents_(source, result) {
   }
   events.push.apply(events, healthConnectionEvents_(source, result));
 
-  if (result && result.state) healthWriteJsonProperty_(stateKey, result.state);
-  healthWriteJsonProperty_(
-    alertKey,
-    currentAlerts.map(function (item) {
-      return item.key;
-    }),
-  );
+  if (comparableState) healthWriteJsonProperty_(stateKey, comparableState);
+  if (
+    source !== 'SHOPIFY_SKU' ||
+    (result && result.available && !result.inProgress && comparableState)
+  ) {
+    healthWriteJsonProperty_(
+      alertKey,
+      currentAlerts.map(function (item) {
+        return item.key;
+      }),
+    );
+  }
   return events;
 }
 
@@ -321,7 +381,8 @@ function sendHealthChangeNotification_(events, results) {
   );
   MailApp.sendEmail({
     to: emails.join(','),
-    subject: '[Kea.] SEO・MEO・Merchant状態変化 ' + dateKey_(new Date()),
+    subject:
+      '[Kea.] SKU・SEO・MEO・Merchant状態変化 ' + dateKey_(new Date()),
     body: lines.join('\n'),
     name: 'Kea. Growth Ops',
   });
@@ -358,6 +419,13 @@ function failedHealthResult_(source, error) {
 }
 
 function writeFailedHealthRow_(source, reason) {
+  if (source === 'SHOPIFY_SKU') {
+    healthWriteJsonProperty_('KEA_HEALTH_LAST_FAILURE_SHOPIFY_SKU', {
+      checkedAt: isoTimestamp_(new Date()),
+      reason: reason,
+    });
+    return;
+  }
   const sheetBySource = {
     MERCHANT: 'MerchantHealth',
     SEO: 'SEOHealth',
@@ -371,6 +439,7 @@ function writeFailedHealthRow_(source, reason) {
     if (header === 'syncStatus') return '取得失敗';
     if (header === 'changeSummary') return 'API取得失敗';
     if (header === 'manualAction') return reason;
+    if (header === 'issues') return reason;
     return '';
   });
   appendHealthRow_(sheetName, row);
@@ -400,7 +469,9 @@ function finishHealthResults_(results) {
   const events = [];
   Object.keys(results).forEach(function (source) {
     const result = results[source];
-    queueHealthRecommendations_(source, result.recommendations || []);
+    if (!(source === 'SHOPIFY_SKU' && result && result.inProgress)) {
+      queueHealthRecommendations_(source, result.recommendations || []);
+    }
     events.push.apply(events, healthSourceEvents_(source, result));
   });
   const email = sendHealthChangeNotification_(events, results);
@@ -413,14 +484,18 @@ function runGrowthHealthWatchNow() {
 
 function runGrowthHealthWatch(force) {
   const forceRun = explicitForceRequested_(force);
+  const executionDeadlineAtMs = Date.now() + KEA_GAS_SAFE_EXECUTION_MS;
   return withScriptLock_('runGrowthHealthWatch', function () {
-    return runGrowthHealthWatchCore_(forceRun);
+    return runGrowthHealthWatchCore_(forceRun, executionDeadlineAtMs);
   });
 }
 
-function runGrowthHealthWatchCore_(forceRun) {
+function runGrowthHealthWatchCore_(forceRun, executionDeadlineAtMs) {
   const startedAt = new Date();
+  const safeDeadlineAtMs = Number(executionDeadlineAtMs || 0) ||
+    startedAt.getTime() + KEA_GAS_SAFE_EXECUTION_MS;
   const properties = PropertiesService.getScriptProperties();
+  recoverShopifySkuPublishBeforeAudit_();
   const runKey = 'KEA_HEALTH_SUCCESS_' + dateKey_(new Date());
   if (!forceRun && properties.getProperty(runKey)) {
     return { status: 'skipped', reason: 'already completed' };
@@ -437,10 +512,17 @@ function runGrowthHealthWatchCore_(forceRun) {
   results.MEO = runHealthMonitorSafely_('MEO', function () {
     return runMeoHealthAuditCore_(config, results.MERCHANT);
   });
+  results.SHOPIFY_SKU = runHealthMonitorSafely_('SHOPIFY_SKU', function () {
+    return runShopifySkuAuditCore_(
+      config,
+      safeDeadlineAtMs - KEA_HEALTH_POST_SKU_RESERVE_MS,
+    );
+  });
   const finalization = finishHealthResults_(results);
   properties.setProperty(runKey, isoTimestamp_(new Date()));
   const output = {
     status: 'completed',
+    shopifySku: results.SHOPIFY_SKU,
     merchant: results.MERCHANT,
     seo: results.SEO,
     meo: results.MEO,
@@ -453,6 +535,7 @@ function runGrowthHealthWatchCore_(forceRun) {
     'runGrowthHealthWatch',
     'success',
     JSON.stringify({
+      shopifySku: results.SHOPIFY_SKU.connectionStatus,
       merchant: results.MERCHANT.connectionStatus,
       seo: results.SEO.connectionStatus,
       meo: results.MEO.connectionStatus,
@@ -470,7 +553,11 @@ function finishSingleHealthWatch_(source, result, handler, startedAt) {
   logRun_(
     startedAt,
     handler,
-    result.available ? 'success' : 'partial',
+    result.inProgress
+      ? 'in_progress'
+      : result.available
+        ? 'success'
+        : 'partial',
     JSON.stringify({
       connectionStatus: result.connectionStatus,
       changes: finalization.events.length,

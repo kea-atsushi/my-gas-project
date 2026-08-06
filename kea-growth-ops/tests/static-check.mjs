@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
@@ -27,6 +28,20 @@ const context = vm.createContext({
   Error,
   RegExp,
   Utilities: {
+    DigestAlgorithm: { SHA_256: "SHA_256" },
+    Charset: { UTF_8: "UTF_8" },
+    computeDigest(_algorithm, input) {
+      return Array.from(
+        crypto.createHash("sha256").update(String(input)).digest(),
+        (value) => (value > 127 ? value - 256 : value),
+      );
+    },
+    base64EncodeWebSafe(bytes) {
+      return Buffer.from(bytes.map((value) => value & 255)).toString(
+        "base64url",
+      );
+    },
+    sleep() {},
     formatDate(date, timeZone, format) {
       const parts = Object.fromEntries(
         new Intl.DateTimeFormat("en-CA", {
@@ -95,6 +110,10 @@ for (const required of [
   "SEOHealth",
   "MEOHealth",
   "GbpConnection",
+  "ShopifySkuAudit",
+  "runShopifySkuAudit",
+  "custom\", key: \"product_code",
+  "selectedOptions",
 ]) {
   assert.ok(allSource.includes(required), `missing required behavior: ${required}`);
 }
@@ -106,6 +125,89 @@ assert.ok(
   !/SHOPIFY_ADMIN_ACCESS_TOKEN\s*[:=]\s*['"][^'"]+['"]/.test(allSource),
   "Shopify token must not be committed",
 );
+assert.ok(!allSource.includes("write_products"), "SKU audit must stay read-only");
+assert.ok(
+  !allSource.includes("productVariantsBulkUpdate"),
+  "SKU audit must not update Shopify variants",
+);
+
+const collectorSource = fs.readFileSync(
+  path.join(root, "Collectors.gs"),
+  "utf8",
+);
+const skuCollectorStart = collectorSource.indexOf(
+  "function collectShopifySkuCatalogPage_",
+);
+const skuCollectorEnd = collectorSource.indexOf(
+  "function auditShopifyProductSeo_",
+  skuCollectorStart,
+);
+assert.ok(skuCollectorStart >= 0 && skuCollectorEnd > skuCollectorStart);
+const skuCollectorSource = collectorSource.slice(
+  skuCollectorStart,
+  skuCollectorEnd,
+);
+assert.ok(
+  skuCollectorSource.includes(
+    'productVariants(first: 100, after: $after, sortKey: ID, query: $query)',
+  ),
+);
+assert.ok(!skuCollectorSource.includes("product_status:"));
+assert.ok(!skuCollectorSource.includes("status:active"));
+assert.ok(skuCollectorSource.includes("pageInfo { hasNextPage endCursor }"));
+assert.ok(skuCollectorSource.includes("partitionSize = 20000"));
+assert.ok(skuCollectorSource.includes("KeaShopifySkuCatalogMaxId"));
+assert.ok(skuCollectorSource.includes("reverse: true"));
+assert.ok(skuCollectorSource.includes("shopifySkuIdRangeQuery_"));
+assert.ok(skuCollectorSource.includes("upperVariantId"));
+assert.ok(skuCollectorSource.includes("collectShopifySkuCatalogPage_"));
+assert.ok(skuCollectorSource.includes("Utilities.sleep"));
+
+const skuHealthSource = fs.readFileSync(
+  path.join(root, "ShopifySkuHealth.gs"),
+  "utf8",
+);
+assert.ok(
+  !/\.split\(\s*['"]-['"]\s*\)/.test(skuHealthSource),
+  "SKU must not be split on hyphens",
+);
+assert.ok(skuHealthSource.includes("writeShopifySkuSheetInChunks_"));
+assert.ok(skuHealthSource.includes("_ShopifySkuAuditStaging"));
+assert.ok(skuHealthSource.includes("_ShopifySkuAuditBackup"));
+assert.ok(skuHealthSource.includes("recoverShopifySkuPublishIfNeeded_"));
+assert.ok(skuHealthSource.includes("recoverShopifySkuPublishBeforeAudit_"));
+assert.ok(skuHealthSource.includes("shopifySkuSpreadsheetId_"));
+assert.ok(skuHealthSource.includes("backupFingerprint"));
+assert.ok(skuHealthSource.includes("PUBLISHING WAL\u6c38\u7d9a\u5316\u5931\u6557"));
+assert.ok(skuHealthSource.includes("shopifySkuPublishReserveMs_"));
+assert.ok(skuHealthSource.includes("phase: 'BACKUP_READY'"));
+assert.ok(skuHealthSource.includes("wal.phase = 'PUBLISHING'"));
+assert.ok(skuHealthSource.includes("wal.phase = 'COMMITTED'"));
+assert.ok(skuHealthSource.includes("{ contentsOnly: true }"));
+assert.ok(skuHealthSource.includes("live.getSheetId() !== liveSheetId"));
+assert.ok(!skuHealthSource.includes(".setName("));
+assert.ok(!skuHealthSource.includes("deleteSheet("));
+assert.ok(skuHealthSource.includes("PRODUCT_CODE_EXPECTED_VENDOR_MISMATCH"));
+assert.ok(skuHealthSource.includes("KEA_SHOPIFY_SKU_CHECKPOINT_SHEET"));
+assert.ok(skuCollectorSource.includes("shopifySkuCheckpointCatalogResult_"));
+assert.ok(skuCollectorSource.includes("executionDeadlineAtMs"));
+assert.ok(skuHealthSource.includes("PRODUCT_CODE_DUPLICATE"));
+assert.ok(skuHealthSource.includes("CROSS_PRODUCT_SKU_DUPLICATE"));
+
+const healthCommonSource = fs.readFileSync(
+  path.join(root, "HealthCommon.gs"),
+  "utf8",
+);
+assert.ok(healthCommonSource.includes("KEA_HEALTH_POST_SKU_RESERVE_MS"));
+assert.ok(
+  healthCommonSource.indexOf("results.MERCHANT") <
+    healthCommonSource.indexOf("results.SHOPIFY_SKU"),
+);
+assert.ok(
+  healthCommonSource.includes(
+    "name === KEA_SHOPIFY_SKU_AUDIT_SHEET && !created",
+  ),
+);
 
 const dashboard = fs.readFileSync(path.join(root, "Dashboard.html"), "utf8");
 assert.ok(dashboard.includes("@media (max-width: 430px)"));
@@ -116,6 +218,7 @@ assert.ok(dashboard.includes("brandRows"));
 assert.ok(dashboard.includes("Merchant"));
 assert.ok(dashboard.includes("SEO"));
 assert.ok(dashboard.includes("MEO"));
+assert.ok(dashboard.includes("Shopify SKU監査"));
 assert.ok(dashboard.includes("min-height: calc(100svh - 20px)"));
 const dashboardScript = dashboard.match(/<script>([\s\S]*?)<\/script>/);
 assert.ok(dashboardScript, "dashboard script must exist");
@@ -137,6 +240,519 @@ const productAudit = context.auditShopifyProductSeo_(
 );
 assert.equal(productAudit.status, "要確認");
 assert.ok(productAudit.issues.includes("SKU空欄"));
+assert.equal(context.normalizeSkuPart_(" Ｆｒｅｅ "), "FREE");
+assert.equal(
+  context.buildExpectedSku_("AB-123", "one size", "black"),
+  "AB-123-ONE-SIZE-BLACK",
+);
+const defaultOptions = context.resolveSkuSelectedOptions_([
+  { name: "Title", value: "Default Title" },
+]);
+assert.equal(defaultOptions.size, "FREE");
+assert.equal(defaultOptions.color, "ONECOLOR");
+const skuAudit = context.buildShopifySkuAudit_([
+  {
+    id: "variant-1",
+    title: "M / BLACK",
+    sku: "2059242-M-BLACK",
+    selectedOptions: [
+      { name: "Color", value: "black" },
+      { name: "Size", value: "M" },
+    ],
+    product: {
+      id: "product-1",
+      title: "TEST",
+      handle: "test",
+      vendor: "TEST",
+      status: "DRAFT",
+      productCode: { value: "2059242" },
+    },
+  },
+], "2026-08-02T12:00:00+09:00");
+assert.equal(skuAudit.summary.productCount, 1);
+assert.equal(skuAudit.summary.variantCount, 1);
+assert.equal(skuAudit.summary.draftProductCount, 1);
+assert.equal(skuAudit.summary.issueVariantCount, 0);
+assert.equal(skuAudit.rows[0].productCode, "2059242");
+assert.equal(skuAudit.rows[0].size, "M");
+assert.equal(skuAudit.rows[0].color, "BLACK");
+assert.equal(context.shopifySkuSheetCell_("=1+1"), "'=1+1");
+assert.equal(
+  context.shopifySkuSheetRows_(skuAudit)[0].length,
+  new vm.Script("KEA_HEALTH_SHEETS.ShopifySkuAudit.length").runInContext(
+    context,
+  ),
+  "ShopifySkuAudit rows must match the dedicated sheet header",
+);
+let mockMaxRows = 1000;
+let mockMaxColumns = 10;
+const mockWriteSizes = [];
+const mockSheet = {
+  getMaxRows() {
+    return mockMaxRows;
+  },
+  getMaxColumns() {
+    return mockMaxColumns;
+  },
+  insertRowsAfter(_row, count) {
+    mockMaxRows += count;
+  },
+  insertColumnsAfter(_column, count) {
+    mockMaxColumns += count;
+  },
+  getRange(_row, _column, _rowCount, _columnCount) {
+    return {
+      setValues(values) {
+        mockWriteSizes.push(values.length);
+      },
+    };
+  },
+};
+const auditHeaders = Array.from({ length: 19 }, (_, index) => `h${index}`);
+const shopifySkuHeaders = new vm.Script(
+  "Array.from(KEA_HEALTH_SHEETS.ShopifySkuAudit)",
+).runInContext(context);
+const auditRows = Array.from({ length: 1201 }, () =>
+  Array.from({ length: 19 }, () => ""),
+);
+context.writeShopifySkuSheetInChunks_(mockSheet, auditHeaders, auditRows);
+assert.equal(mockMaxRows, 1202);
+assert.equal(mockMaxColumns, 19);
+assert.deepEqual(mockWriteSizes, [1, 500, 500, 201]);
+
+function createSkuPublishWorkbook_(failPublishOnce) {
+  let nextSheetId = 200;
+  const sheets = [];
+  const state = { failPublishOnce: !!failPublishOnce, flushes: 0 };
+
+  function createSheet_(name, fixedId) {
+    let maxRows = 10;
+    let maxColumns = 22;
+    let values = Array.from({ length: maxRows }, () =>
+      Array(maxColumns).fill(""),
+    );
+    let formulas = Array.from({ length: maxRows }, () =>
+      Array(maxColumns).fill(""),
+    );
+    const chart = { id: `${name}-chart` };
+    const protection = { id: `${name}-protection` };
+
+    function addRows_(count) {
+      for (let index = 0; index < count; index += 1) {
+        values.push(Array(maxColumns).fill(""));
+        formulas.push(Array(maxColumns).fill(""));
+      }
+      maxRows += count;
+    }
+
+    function addColumns_(count) {
+      values.forEach((row) => row.push(...Array(count).fill("")));
+      formulas.forEach((row) => row.push(...Array(count).fill("")));
+      maxColumns += count;
+    }
+
+    const sheet = {
+      name,
+      id: fixedId || nextSheetId++,
+      hidden: false,
+      getName() {
+        return name;
+      },
+      getSheetId() {
+        return this.id;
+      },
+      getMaxRows() {
+        return maxRows;
+      },
+      getMaxColumns() {
+        return maxColumns;
+      },
+      insertRowsAfter(_after, count) {
+        addRows_(count);
+      },
+      insertColumnsAfter(_after, count) {
+        addColumns_(count);
+      },
+      hideSheet() {
+        this.hidden = true;
+      },
+      clearContents() {
+        values = Array.from({ length: maxRows }, () =>
+          Array(maxColumns).fill(""),
+        );
+        formulas = Array.from({ length: maxRows }, () =>
+          Array(maxColumns).fill(""),
+        );
+      },
+      getLastRow() {
+        for (let row = maxRows - 1; row >= 0; row -= 1) {
+          if (
+            values[row].some((value) => value !== "") ||
+            formulas[row].some((value) => value !== "")
+          ) {
+            return row + 1;
+          }
+        }
+        return 0;
+      },
+      getCharts() {
+        return [chart];
+      },
+      getProtections() {
+        return [protection];
+      },
+      getRange(row, column, rowCount = 1, columnCount = 1) {
+        const firstRow = row - 1;
+        const firstColumn = column - 1;
+        const range = {
+          sheet,
+          row,
+          column,
+          rowCount,
+          columnCount,
+          setValues(input) {
+            for (let rowOffset = 0; rowOffset < rowCount; rowOffset += 1) {
+              for (
+                let columnOffset = 0;
+                columnOffset < columnCount;
+                columnOffset += 1
+              ) {
+                values[firstRow + rowOffset][firstColumn + columnOffset] =
+                  input[rowOffset][columnOffset];
+                formulas[firstRow + rowOffset][firstColumn + columnOffset] = "";
+              }
+            }
+            return this;
+          },
+          setValue(input) {
+            return this.setValues([[input]]);
+          },
+          setFormula(input) {
+            formulas[firstRow][firstColumn] = input;
+            values[firstRow][firstColumn] = "";
+            return this;
+          },
+          setFormulas(input) {
+            for (let rowOffset = 0; rowOffset < rowCount; rowOffset += 1) {
+              for (
+                let columnOffset = 0;
+                columnOffset < columnCount;
+                columnOffset += 1
+              ) {
+                formulas[firstRow + rowOffset][firstColumn + columnOffset] =
+                  input[rowOffset][columnOffset];
+                values[firstRow + rowOffset][firstColumn + columnOffset] = "";
+              }
+            }
+            return this;
+          },
+          getValues() {
+            return Array.from({ length: rowCount }, (_, rowOffset) =>
+              Array.from(
+                { length: columnCount },
+                (_, columnOffset) =>
+                  values[firstRow + rowOffset][firstColumn + columnOffset],
+              ),
+            );
+          },
+          getValue() {
+            return this.getValues()[0][0];
+          },
+          getFormulas() {
+            return Array.from({ length: rowCount }, (_, rowOffset) =>
+              Array.from(
+                { length: columnCount },
+                (_, columnOffset) =>
+                  formulas[firstRow + rowOffset][firstColumn + columnOffset],
+              ),
+            );
+          },
+          clearContent() {
+            for (let rowOffset = 0; rowOffset < rowCount; rowOffset += 1) {
+              for (
+                let columnOffset = 0;
+                columnOffset < columnCount;
+                columnOffset += 1
+              ) {
+                values[firstRow + rowOffset][firstColumn + columnOffset] = "";
+                formulas[firstRow + rowOffset][firstColumn + columnOffset] = "";
+              }
+            }
+            return this;
+          },
+          copyTo(target, options) {
+            assert.equal(options && options.contentsOnly, true);
+            if (
+              state.failPublishOnce &&
+              sheet.getName() === "_ShopifySkuAuditStaging" &&
+              target.sheet.getName() === "ShopifySkuAudit"
+            ) {
+              state.failPublishOnce = false;
+              throw new Error("injected publish failure");
+            }
+            for (let rowOffset = 0; rowOffset < rowCount; rowOffset += 1) {
+              for (
+                let columnOffset = 0;
+                columnOffset < columnCount;
+                columnOffset += 1
+              ) {
+                target.sheet._setCell(
+                  target.row + rowOffset,
+                  target.column + columnOffset,
+                  values[firstRow + rowOffset][firstColumn + columnOffset],
+                  formulas[firstRow + rowOffset][firstColumn + columnOffset],
+                );
+              }
+            }
+          },
+        };
+        return range;
+      },
+      _setCell(row, column, value, formula) {
+        values[row - 1][column - 1] = value;
+        formulas[row - 1][column - 1] = formula;
+      },
+      snapshot(rowCount, columnCount) {
+        return {
+          values: this.getRange(1, 1, rowCount, columnCount).getValues(),
+          formulas: this.getRange(1, 1, rowCount, columnCount).getFormulas(),
+        };
+      },
+    };
+    sheets.push(sheet);
+    return sheet;
+  }
+
+  const live = createSheet_("ShopifySkuAudit", 101);
+  live.getRange(1, 1).setValue("old-header");
+  live.getRange(2, 1).setValue("old-row");
+  live.getRange(3, 2).setFormula("=A2");
+  live.getRange(3, 20).setFormula("=ShopifySkuAudit!A2");
+  const spreadsheet = {
+    getId() {
+      return "mock-spreadsheet-id";
+    },
+    getSheetByName(name) {
+      return sheets.find((sheet) => sheet.getName() === name) || null;
+    },
+    getSheetById(id) {
+      return sheets.find((sheet) => sheet.getSheetId() === Number(id)) || null;
+    },
+    getSheets() {
+      return sheets.slice();
+    },
+    insertSheet(name) {
+      return createSheet_(name);
+    },
+  };
+  return { spreadsheet, live, state };
+}
+
+function createScriptProperties_(initialValues) {
+  const values = new Map(Object.entries(initialValues || {}));
+  return {
+    values,
+    service: {
+      getScriptProperties() {
+        return {
+          getProperty(key) {
+            return values.has(key) ? values.get(key) : null;
+          },
+          setProperty(key, value) {
+            values.set(key, String(value));
+          },
+          deleteProperty(key) {
+            values.delete(key);
+          },
+        };
+      },
+    },
+  };
+}
+
+const originalDashboardSpreadsheet = context.getDashboardSpreadsheet_;
+const originalPropertiesService = context.PropertiesService;
+const originalSpreadsheetApp = context.SpreadsheetApp;
+try {
+  const successWorkbook = createSkuPublishWorkbook_(false);
+  const successProperties = createScriptProperties_({
+    KEA_SHOPIFY_SKU_LIVE_ROW_COUNT: "3",
+  });
+  context.getDashboardSpreadsheet_ = () => successWorkbook.spreadsheet;
+  context.PropertiesService = successProperties.service;
+  context.SpreadsheetApp = {
+    flush() {
+      successWorkbook.state.flushes += 1;
+    },
+  };
+  const originalLiveId = successWorkbook.live.getSheetId();
+  const originalChart = successWorkbook.live.getCharts()[0];
+  const originalProtection = successWorkbook.live.getProtections()[0];
+  context.writeShopifySkuAudit_(skuAudit);
+  assert.equal(successWorkbook.live.getSheetId(), originalLiveId);
+  assert.equal(successWorkbook.live.getName(), "ShopifySkuAudit");
+  assert.equal(successWorkbook.live.getCharts()[0], originalChart);
+  assert.equal(successWorkbook.live.getProtections()[0], originalProtection);
+  assert.equal(
+    successWorkbook.live.getRange(3, 20).getFormulas()[0][0],
+    "=ShopifySkuAudit!A2",
+  );
+  assert.equal(
+    successWorkbook.live.getRange(3, 2).getFormulas()[0][0],
+    "=A2",
+  );
+  assert.equal(successWorkbook.live.getRange(2, 12).getValue(), "2059242");
+  assert.equal(
+    successProperties.values.get("KEA_SHOPIFY_SKU_LIVE_ROW_COUNT"),
+    "2",
+  );
+  assert.equal(
+    successProperties.values.has("KEA_SHOPIFY_SKU_PUBLISH_WAL_V1"),
+    false,
+  );
+
+  const rollbackWorkbook = createSkuPublishWorkbook_(true);
+  const rollbackProperties = createScriptProperties_({
+    KEA_SHOPIFY_SKU_LIVE_ROW_COUNT: "3",
+  });
+  const beforeRollback = rollbackWorkbook.live.snapshot(3, 20);
+  const rollbackLiveId = rollbackWorkbook.live.getSheetId();
+  context.getDashboardSpreadsheet_ = () => rollbackWorkbook.spreadsheet;
+  context.PropertiesService = rollbackProperties.service;
+  context.SpreadsheetApp = {
+    flush() {
+      rollbackWorkbook.state.flushes += 1;
+    },
+  };
+  assert.throws(
+    () => context.writeShopifySkuAudit_(skuAudit),
+    /injected publish failure/,
+  );
+  assert.equal(rollbackWorkbook.live.getSheetId(), rollbackLiveId);
+  assert.deepEqual(rollbackWorkbook.live.snapshot(3, 20), beforeRollback);
+  assert.equal(
+    rollbackProperties.values.get("KEA_SHOPIFY_SKU_LIVE_ROW_COUNT"),
+    "3",
+  );
+  assert.equal(
+    rollbackProperties.values.has("KEA_SHOPIFY_SKU_PUBLISH_WAL_V1"),
+    false,
+  );
+
+  const recoveryWorkbook = createSkuPublishWorkbook_(false);
+  const recoveryProperties = createScriptProperties_({
+    KEA_SHOPIFY_SKU_LIVE_ROW_COUNT: "3",
+  });
+  context.getDashboardSpreadsheet_ = () => recoveryWorkbook.spreadsheet;
+  context.PropertiesService = recoveryProperties.service;
+  context.SpreadsheetApp = {
+    flush() {
+      recoveryWorkbook.state.flushes += 1;
+    },
+  };
+  const recoveryBackup = recoveryWorkbook.spreadsheet.insertSheet(
+    "_ShopifySkuAuditBackup",
+  );
+  const recoveryStaging = recoveryWorkbook.spreadsheet.insertSheet(
+    "_ShopifySkuAuditStaging",
+  );
+  context.copyShopifySkuSheetContents_(
+    recoveryWorkbook.live,
+    recoveryBackup,
+    3,
+    19,
+  );
+  const expectedRecovery = recoveryWorkbook.live.snapshot(3, 20);
+  const healthRunKey = `KEA_HEALTH_SUCCESS_${context.dateKey_(new Date())}`;
+  recoveryProperties.values.set(healthRunKey, "already-completed");
+  recoveryProperties.values.set(
+    "KEA_SHOPIFY_SKU_PUBLISH_WAL_V1",
+    JSON.stringify({
+      version: 1,
+      phase: "PUBLISHING",
+      spreadsheetId: "mock-spreadsheet-id",
+      schemaFingerprint: context.shopifySkuValuesFingerprint_([
+        shopifySkuHeaders,
+      ]),
+      backupFingerprint: context.shopifySkuSheetFingerprint_(
+        recoveryBackup,
+        3,
+        19,
+      ),
+      liveSheetId: recoveryWorkbook.live.getSheetId(),
+      stagingSheetId: recoveryStaging.getSheetId(),
+      backupSheetId: recoveryBackup.getSheetId(),
+      previousRowCountText: "3",
+      newRowCount: 2,
+      managedRowCount: 3,
+      columnCount: 19,
+      updatedAt: "2026-08-02T12:00:00+09:00",
+    }),
+  );
+  recoveryWorkbook.live.getRange(1, 1, 3, 19).clearContent();
+  const skippedHealth = context.runGrowthHealthWatchCore_(
+    false,
+    Date.now() + 330000,
+  );
+  assert.equal(skippedHealth.status, "skipped");
+  assert.deepEqual(recoveryWorkbook.live.snapshot(3, 20), expectedRecovery);
+  assert.equal(
+    recoveryProperties.values.has("KEA_SHOPIFY_SKU_PUBLISH_WAL_V1"),
+    false,
+  );
+
+  const mismatchWorkbook = createSkuPublishWorkbook_(false);
+  const mismatchProperties = createScriptProperties_({});
+  const mismatchBackup = mismatchWorkbook.spreadsheet.insertSheet(
+    "_ShopifySkuAuditBackup",
+  );
+  const mismatchStaging = mismatchWorkbook.spreadsheet.insertSheet(
+    "_ShopifySkuAuditStaging",
+  );
+  context.copyShopifySkuSheetContents_(
+    mismatchWorkbook.live,
+    mismatchBackup,
+    3,
+    19,
+  );
+  mismatchProperties.values.set(
+    "KEA_SHOPIFY_SKU_PUBLISH_WAL_V1",
+    JSON.stringify({
+      version: 1,
+      phase: "PUBLISHING",
+      spreadsheetId: "different-spreadsheet-id",
+      schemaFingerprint: context.shopifySkuValuesFingerprint_([
+        shopifySkuHeaders,
+      ]),
+      backupFingerprint: context.shopifySkuSheetFingerprint_(
+        mismatchBackup,
+        3,
+        19,
+      ),
+      liveSheetId: mismatchWorkbook.live.getSheetId(),
+      stagingSheetId: mismatchStaging.getSheetId(),
+      backupSheetId: mismatchBackup.getSheetId(),
+      previousRowCountText: "3",
+      newRowCount: 2,
+      managedRowCount: 3,
+      columnCount: 19,
+      updatedAt: "2026-08-02T12:00:00+09:00",
+    }),
+  );
+  const beforeMismatch = mismatchWorkbook.live.snapshot(3, 20);
+  context.getDashboardSpreadsheet_ = () => mismatchWorkbook.spreadsheet;
+  context.PropertiesService = mismatchProperties.service;
+  assert.throws(
+    () => context.recoverShopifySkuPublishBeforeAudit_(),
+    /spreadsheet ID/,
+  );
+  assert.deepEqual(mismatchWorkbook.live.snapshot(3, 20), beforeMismatch);
+} finally {
+  context.getDashboardSpreadsheet_ = originalDashboardSpreadsheet;
+  context.PropertiesService = originalPropertiesService;
+  context.SpreadsheetApp = originalSpreadsheetApp;
+}
+
 const dailyRecommendations = context.buildDailyRecommendations_(
   { missingSources: [] },
   {
@@ -233,6 +849,89 @@ assert.equal(
   1,
 );
 
+const scriptProperties = new Map();
+context.PropertiesService = {
+  getScriptProperties() {
+    return {
+      getProperty(key) {
+        return scriptProperties.has(key) ? scriptProperties.get(key) : null;
+      },
+      setProperty(key, value) {
+        scriptProperties.set(key, String(value));
+      },
+      deleteProperty(key) {
+        scriptProperties.delete(key);
+      },
+    };
+  },
+};
+context.healthWriteJsonProperty_("KEA_HEALTH_STATE_SHOPIFY_SKU", {
+  variantCount: 100,
+  issueVariantCount: 10,
+  skuBlankCount: 2,
+  skuFormatCount: 3,
+  duplicateSkuCount: 1,
+  duplicateProductCodeCount: 1,
+  productCodeMissingCount: 4,
+  optionIssueCount: 5,
+});
+const firstSkuFailureEvents = context.healthSourceEvents_("SHOPIFY_SKU", {
+  available: false,
+  state: { connectionStatus: "failed", reason: "temporary" },
+  notificationIssues: [],
+  reason: "temporary",
+});
+assert.equal(firstSkuFailureEvents.length, 0);
+assert.equal(
+  JSON.parse(scriptProperties.get("KEA_HEALTH_STATE_SHOPIFY_SKU")).variantCount,
+  100,
+);
+context.writeFailedHealthRow_("SHOPIFY_SKU", "temporary");
+assert.ok(scriptProperties.has("KEA_HEALTH_LAST_FAILURE_SHOPIFY_SKU"));
+context.healthWriteJsonProperty_("KEA_HEALTH_ACTIVE_ALERTS_SHOPIFY_SKU", [
+  "SHOPIFY_SKU|existing-alert",
+]);
+context.healthWriteJsonProperty_(
+  "KEA_HEALTH_ACTIVE_RECOMMENDATIONS_SHOPIFY_SKU",
+  ["SHOPIFY_SKU|existing-recommendation"],
+);
+const skuInProgressFinalization = context.finishHealthResults_({
+  SHOPIFY_SKU: {
+    source: "SHOPIFY_SKU",
+    available: true,
+    inProgress: true,
+    connectionStatus: "in_progress",
+    state: null,
+    recommendations: [],
+    notificationIssues: [],
+  },
+});
+assert.equal(skuInProgressFinalization.events.length, 0);
+assert.equal(
+  JSON.parse(
+    scriptProperties.get("KEA_HEALTH_STATE_SHOPIFY_SKU"),
+  ).variantCount,
+  100,
+);
+assert.deepEqual(
+  JSON.parse(
+    scriptProperties.get("KEA_HEALTH_ACTIVE_ALERTS_SHOPIFY_SKU"),
+  ),
+  ["SHOPIFY_SKU|existing-alert"],
+);
+assert.deepEqual(
+  JSON.parse(
+    scriptProperties.get(
+      "KEA_HEALTH_ACTIVE_RECOMMENDATIONS_SHOPIFY_SKU",
+    ),
+  ),
+  ["SHOPIFY_SKU|existing-recommendation"],
+);
+assert.equal(
+  scriptProperties.get("KEA_HEALTH_FAILURE_STREAK_SHOPIFY_SKU"),
+  "1",
+);
+
 const gasUnitResults = context.runKeaGrowthUnitTests();
 assert.ok(Array.isArray(gasUnitResults), "Tests.gs must return results");
 assert.equal(
@@ -246,6 +945,7 @@ for (const handler of [
   "runSeoHealthAudit",
   "runMeoHealthAudit",
   "runGrowthHealthWatch",
+  "runShopifySkuAudit",
 ]) {
   assert.ok(
     allSource.includes(`withScriptLock_('${handler}'`),
@@ -268,7 +968,7 @@ console.log(
     {
       status: "passed",
       gasFiles: gasFiles.length,
-      checks: 61,
+      checks: 141,
       gasUnitTests: gasUnitResults.length,
     },
     null,
