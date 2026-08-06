@@ -1,0 +1,110 @@
+name: One-time deploy SALE fix
+
+on:
+  push:
+    branches:
+      - agent/deploy-sale-fix-once
+    paths:
+      - .github/workflows/one-time-deploy-sale-fix.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: kea-growth-ops-production
+  cancel-in-progress: false
+
+env:
+  APPS_SCRIPT_ID: 1n5AmVYn-mNNkA9r5c_W1s11FSCTezGgFWPIh3sVScSCgKqW-Pop0kdjx
+  CLASP_VERSION: 3.3.0
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: apps-script-production
+
+    steps:
+      - name: Checkout deployment branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify branch is based on deployed main
+        run: |
+          git fetch origin main --depth=1
+          test "$(git rev-parse HEAD^)" = "$(git rev-parse origin/main)"
+
+      - name: Run all production tests
+        run: |
+          node kea-growth-ops/tests/static-check.mjs
+          node kea-growth-ops/tests/sale-bulk-check.mjs
+
+      - name: Restore Google authorization
+        env:
+          CLASPRC_JSON_B64: ${{ secrets.CLASPRC_JSON_B64 }}
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const path = require("node:path");
+            const secret = process.env.CLASPRC_JSON_B64?.trim();
+            if (!secret) throw new Error("CLASPRC_JSON_B64 is not configured");
+            const parse = (value) => { try { return JSON.parse(value); } catch { return null; } };
+            let parsed = parse(secret);
+            if (!parsed) parsed = parse(Buffer.from(secret.replace(/\s+/g, ""), "base64").toString("utf8"));
+            if (!parsed || typeof parsed !== "object") throw new Error("Invalid clasp authorization secret");
+            const modern = parsed.tokens && Object.keys(parsed.tokens).length > 0;
+            const legacy = parsed.token || parsed.access_token || parsed.refresh_token;
+            if (!modern && !legacy) throw new Error("Secret is not a clasp authorization file");
+            fs.writeFileSync(path.join(process.env.HOME, ".clasprc.json"), JSON.stringify(parsed, null, 2) + "\n", { mode: 0o600 });
+          '
+
+      - name: Configure fixed Apps Script target
+        working-directory: kea-growth-ops
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const scriptId = process.env.APPS_SCRIPT_ID;
+            if (!/^[A-Za-z0-9_-]+$/.test(scriptId)) throw new Error("Invalid Apps Script ID");
+            fs.writeFileSync(".clasp.json", JSON.stringify({ scriptId, rootDir: "." }, null, 2) + "\n", { mode: 0o600 });
+          '
+
+      - name: Verify Google authorization
+        run: npx --yes "@google/clasp@${CLASP_VERSION}" --json show-authorized-user >/dev/null
+
+      - name: Push source to Apps Script
+        working-directory: kea-growth-ops
+        run: npx --yes "@google/clasp@${CLASP_VERSION}" push --force
+
+      - name: Record immutable Apps Script version
+        working-directory: kea-growth-ops
+        run: npx --yes "@google/clasp@${CLASP_VERSION}" create-version "GitHub ${GITHUB_SHA}"
+
+      - name: Show current deployments
+        working-directory: kea-growth-ops
+        run: npx --yes "@google/clasp@${CLASP_VERSION}" deployments
+
+      - name: Write deployment summary
+        run: |
+          {
+            echo "### Kea Growth Ops"
+            echo "- Source push: success"
+            echo "- Version creation: success"
+            echo "- Git commit: \`${GITHUB_SHA}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Remove temporary authorization files
+        if: always()
+        run: rm -f "${HOME}/.clasprc.json" "kea-growth-ops/.clasp.json"
+
+      - name: Remove one-time workflow from branch
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/one-time-deploy-sale-fix.yml
+          git commit -m "Remove one-time deploy workflow"
+          git push origin HEAD:${GITHUB_REF_NAME}
