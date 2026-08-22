@@ -411,8 +411,14 @@
               ${healthItem('営業時間', booleanLabel(meoHealth.hoursMatch))}
               ${healthItem('WebサイトURL', booleanLabel(meoHealth.websiteMatches))}
               ${healthItem('口コミ数', meoHealth.reviewCount)}
+              ${healthItem('口コミ監視', meoHealth.reviewsStatus)}
               ${healthItem('平均評価', meoHealth.averageRating)}
               ${healthItem('未返信口コミ', meoHealth.unansweredReviews)}
+              ${healthItem('GBP Performance', meoHealth.performanceStatus)}
+              ${healthItem('GBP表示（7日）', meoHealth.performanceImpressions)}
+              ${healthItem('Webクリック（7日）', meoHealth.performanceWebsiteClicks)}
+              ${healthItem('電話クリック（7日）', meoHealth.performanceCallClicks)}
+              ${healthItem('ルート検索（7日）', meoHealth.performanceDirectionRequests)}
               ${healthItem('ローカル在庫リンク', meoHealth.localInventoryLinkStatus)}
             </div>
           </article>`;

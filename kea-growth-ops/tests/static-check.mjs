@@ -110,6 +110,8 @@ for (const required of [
   "SEOHealth",
   "MEOHealth",
   "GbpConnection",
+  "businessprofileperformance.googleapis.com/v1",
+  "unavailable/pending",
   "ShopifySkuAudit",
   "runShopifySkuAudit",
   "custom\", key: \"product_code",
@@ -855,6 +857,69 @@ assert.equal(
   ]).length,
   1,
 );
+const pendingReviewOutcome = context.meoConnectionOutcome_(
+  { available: true, value: {}, error: "" },
+  { available: true, value: { hasVoiceOfMerchant: true }, error: "" },
+  {
+    available: false,
+    value: { reviews: [] },
+    error:
+      "GBP口コミ: Google My Business API has not been used in project 119772560648 before or it is disabled. HTTP 403",
+  },
+);
+assert.equal(pendingReviewOutcome.status, "connected");
+assert.equal(pendingReviewOutcome.reviewStatus, "unavailable/pending");
+const gbpPerformanceSummary = context.gbpPerformanceSummary_({
+  multiDailyMetricTimeSeries: [
+    {
+      dailyMetricTimeSeries: [
+        {
+          dailyMetric: "BUSINESS_IMPRESSIONS_MOBILE_SEARCH",
+          timeSeries: { datedValues: [{ value: "10" }, { value: "20" }] },
+        },
+        {
+          dailyMetric: "WEBSITE_CLICKS",
+          timeSeries: { datedValues: [{ value: "3" }] },
+        },
+      ],
+    },
+  ],
+});
+assert.equal(gbpPerformanceSummary.businessImpressions, 30);
+assert.equal(gbpPerformanceSummary.websiteClicks, 3);
+assert.equal(gbpPerformanceSummary.callClicks, 0);
+const verificationFailureOutcome = context.meoConnectionOutcome_(
+  { available: true, value: {}, error: "" },
+  { available: false, value: null, error: "GBP確認状態: HTTP 403" },
+  {
+    available: false,
+    value: { reviews: [] },
+    error: "GBP口コミ: mybusiness.googleapis.com SERVICE_DISABLED 403",
+  },
+);
+assert.equal(verificationFailureOutcome.status, "partial");
+const unknownReviewFailureOutcome = context.meoConnectionOutcome_(
+  { available: true, value: {}, error: "" },
+  { available: true, value: { hasVoiceOfMerchant: true }, error: "" },
+  {
+    available: false,
+    value: { reviews: [] },
+    error: "GBP口コミ: HTTP 500",
+  },
+);
+assert.equal(unknownReviewFailureOutcome.status, "partial");
+assert.equal(unknownReviewFailureOutcome.reviewStatus, "unavailable");
+const performanceFailureOutcome = context.meoConnectionOutcome_(
+  { available: true, value: {}, error: "" },
+  { available: true, value: { hasVoiceOfMerchant: true }, error: "" },
+  { available: true, value: { reviews: [] }, error: "" },
+  {
+    available: false,
+    value: { metrics: {} },
+    error: "GBP Performance: HTTP 403",
+  },
+);
+assert.equal(performanceFailureOutcome.status, "partial");
 
 const scriptProperties = new Map();
 context.PropertiesService = {
