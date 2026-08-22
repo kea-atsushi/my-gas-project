@@ -778,6 +778,46 @@ function runKeaGrowthUnitTests() {
     );
     assertEqual_(newItems.length, 0);
   }, results);
+  test_('active health recommendation is restored when its row is missing', function () {
+    const item = healthRecommendation_(
+      'MEO',
+      'field|Webサイト',
+      'Googleビジネスプロフィール',
+      '高',
+      'Webサイト',
+      '現在値と期待値が異なる',
+      '承認後に手動変更します。',
+    );
+    const restored = healthRecommendationQueueItems_(
+      [item],
+      [item.healthKey],
+      {},
+    );
+    assertEqual_(restored.length, 1);
+    const recorded = {};
+    recorded[healthRecommendationSignature_(item)] = true;
+    assertEqual_(
+      healthRecommendationQueueItems_([item], [item.healthKey], recorded).length,
+      0,
+    );
+  }, results);
+  test_('reappearing health recommendation is queued again', function () {
+    const item = healthRecommendation_(
+      'MEO',
+      'field|Webサイト',
+      'Googleビジネスプロフィール',
+      '高',
+      'Webサイト',
+      '現在値と期待値が異なる',
+      '承認後に手動変更します。',
+    );
+    const recorded = {};
+    recorded[healthRecommendationSignature_(item)] = true;
+    assertEqual_(
+      healthRecommendationQueueItems_([item], [], recorded).length,
+      1,
+    );
+  }, results);
   test_('PENDING_PROCESSING is not an immediate action', function () {
     assertEqual_(
       merchantIssueNeedsAction_({ resolution: 'PENDING_PROCESSING' }),
