@@ -209,61 +209,20 @@ function healthNewAlertItems_(currentItems, previousKeys) {
   });
 }
 
-function healthRecommendationSignature_(item) {
-  return [
-    item && item.cadence,
-    item && item.category,
-    item && item.target,
-    item && item.recommendation,
-  ].map(function (value) {
-    return String(value || '');
-  }).join('\u001f');
-}
-
-function healthRecordedRecommendationSignatures_() {
-  const sheet = getDashboardSpreadsheet_().getSheetByName('Recommendations');
-  if (!sheet || sheet.getLastRow() < 2) return {};
-  const values = sheet.getDataRange().getValues();
-  const headers = values.shift() || [];
-  const signatures = {};
-  values.forEach(function (row) {
-    const item = rowObject_(headers, row);
-    signatures[healthRecommendationSignature_(item)] = true;
-  });
-  return signatures;
-}
-
-function healthRecommendationQueueItems_(
-  items,
-  previousKeys,
-  recordedSignatures,
-) {
-  const previous = {};
-  const seen = {};
-  (previousKeys || []).forEach(function (key) {
-    previous[String(key)] = true;
-  });
-  return (items || []).filter(function (item) {
-    if (!item || !item.healthKey) return false;
-    const key = String(item.healthKey);
-    if (seen[key]) return false;
-    seen[key] = true;
-    return !previous[key] ||
-      !recordedSignatures[healthRecommendationSignature_(item)];
-  });
-}
-
 function queueHealthRecommendations_(source, recommendations) {
   const propertyKey = 'KEA_HEALTH_ACTIVE_RECOMMENDATIONS_' + source;
   const previousKeys = healthReadJsonProperty_(propertyKey, []);
   const items = (recommendations || []).filter(function (item) {
     return item && item.healthKey;
   });
-  const newItems = healthRecommendationQueueItems_(
-    items,
+  const newItems = healthNewAlertItems_(
+    items.map(function (item) {
+      return { key: item.healthKey, item: item };
+    }),
     previousKeys,
-    healthRecordedRecommendationSignatures_(),
-  );
+  ).map(function (entry) {
+    return entry.item;
+  });
   appendRecommendations_(newItems);
   healthWriteJsonProperty_(
     propertyKey,
