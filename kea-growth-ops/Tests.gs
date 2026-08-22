@@ -821,13 +821,13 @@ function runKeaGrowthUnitTests() {
     assertEqual_(state.available, false);
     assertEqual_(state.status, 'needs_setup');
   }, results);
-  test_('GBP information difference is detected', function () {
+  test_('GBP website difference does not flag confirmed name or address', function () {
     const comparison = compareGbpLocation_({
-      title: 'Kea.',
+      title: 'セレクトショップ Kea.',
       storefrontAddress: {
         administrativeArea: '愛知県',
         locality: '名古屋市中区',
-        addressLines: ['大須3丁目2-1 OSビル1F'],
+        addressLines: ['大須３丁目２−１OS ビル1階'],
       },
       phoneNumbers: { primaryPhone: '052-242-0700' },
       websiteUri: 'https://wrong.example/',
@@ -841,7 +841,9 @@ function runKeaGrowthUnitTests() {
         ],
       },
     });
+    assertEqual_(comparison.businessInfoMatches, true);
     assertEqual_(comparison.websiteMatches, false);
+    assertEqual_(comparison.differences.length, 1);
     assertTrue_(comparison.differences.some(function (item) {
       return item.field === 'Webサイト';
     }));
