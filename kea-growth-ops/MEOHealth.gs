@@ -1,6 +1,6 @@
 const KEA_GBP_EXPECTED = Object.freeze({
-  name: 'Kea.',
-  address: '愛知県名古屋市中区大須3丁目2-1 OSビル1F',
+  name: 'セレクトショップ Kea.',
+  address: '愛知県名古屋市中区大須３丁目２−１ OSビル1階',
   phone: '052-242-0700',
   website: 'https://store.kea.co.jp/',
   hours: {
