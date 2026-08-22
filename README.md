@@ -125,7 +125,7 @@ Secret登録後の配備手順:
 
 Apps Scriptの時間主導トリガーは指定時刻の前後に実行されます。同時実行は`LockService`で防止し、日次・週次は成功キーで重複を防止します。
 
-SEO・MEO・Merchant監視は日次処理へ統合済みです。新しい時間主導トリガーは追加しません。状態変化がない日は専用メールを送りません。API接続失敗は2回連続した時点で1回だけ通知します。
+SEO・MEO・Merchant監視は日次処理へ統合済みです。新しい時間主導トリガーは追加しません。状態変化がない日は専用メールを送りません。API接続失敗は2回連続した時点で1回だけ通知します。`mybusiness.googleapis.com`のサービス未有効を示す口コミ403だけが残る場合は、口コミを`unavailable/pending`として記録し、GBP基本情報・確認状態・Merchant・SEO・広告の監視を止めません。Verifications 403や未知の口コミエラーは引き続き`partial`です。
 
 ## 出力
 
@@ -137,7 +137,7 @@ SEO・MEO・Merchant監視は日次処理へ統合済みです。新しい時間
 - `MerchantHealth`: 商品総数、承認、審査中、不承認、制限、同期状態、前回差分
 - `MerchantIssues`: 商品・アカウントissue、重大度、解決方法、国、掲載先、解決URL、影響商品数
 - `SEOHealth`: 7日比較、デバイス、サイトマップ、主要URL、canonical、旧EC URL
-- `MEOHealth`: 店舗情報、営業時間、確認状態、口コミ、ローカル在庫リンク
+- `MEOHealth`: 店舗情報、営業時間、確認状態、口コミ、口コミ監視状態・理由、直近7日のGBP表示・Webクリック・電話クリック・ルート検索、ローカル在庫リンク
 - `GbpConnection`: API接続理由、確認済みID、候補、必要な1回の手動操作
 - `ShopifySkuAudit`: 商品コード、サイズ、カラー、現在SKU、期待SKU、空欄、形式違反、重複、option異常
 - `Recommendations`: 停止、追加、除外語句、入札、予算、SEO、商品改善の候補

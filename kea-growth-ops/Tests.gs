@@ -854,6 +854,74 @@ function runKeaGrowthUnitTests() {
     assertEqual_(reviews.length, 1);
     assertEqual_(reviews[0].reviewId, 'new');
   }, results);
+  test_('Google My Business review service 403 stays non-blocking', function () {
+    const outcome = meoConnectionOutcome_(
+      { available: true, value: {}, error: '' },
+      { available: true, value: { hasVoiceOfMerchant: true }, error: '' },
+      {
+        available: false,
+        value: { reviews: [] },
+        error: 'GBP口コミ: Google My Business API has not been used in project 119772560648 before or it is disabled. HTTP 403',
+      },
+    );
+    assertEqual_(outcome.status, 'connected');
+    assertEqual_(outcome.reviewStatus, 'unavailable/pending');
+  }, results);
+  test_('GBP Performance daily metrics are aggregated', function () {
+    const summary = gbpPerformanceSummary_({
+      multiDailyMetricTimeSeries: [
+        {
+          dailyMetricTimeSeries: [
+            {
+              dailyMetric: 'BUSINESS_IMPRESSIONS_MOBILE_SEARCH',
+              timeSeries: { datedValues: [{ value: '10' }, { value: '20' }] },
+            },
+            {
+              dailyMetric: 'WEBSITE_CLICKS',
+              timeSeries: { datedValues: [{ value: '3' }] },
+            },
+          ],
+        },
+      ],
+    });
+    assertEqual_(summary.businessImpressions, 30);
+    assertEqual_(summary.websiteClicks, 3);
+    assertEqual_(summary.callClicks, 0);
+  }, results);
+  test_('verification or unknown review failures remain visible', function () {
+    const verificationFailure = meoConnectionOutcome_(
+      { available: true, value: {}, error: '' },
+      { available: false, value: null, error: 'GBP確認状態: HTTP 403' },
+      {
+        available: false,
+        value: { reviews: [] },
+        error: 'GBP口コミ: mybusiness.googleapis.com SERVICE_DISABLED 403',
+      },
+    );
+    assertEqual_(verificationFailure.status, 'partial');
+    const unknownReviewFailure = meoConnectionOutcome_(
+      { available: true, value: {}, error: '' },
+      { available: true, value: { hasVoiceOfMerchant: true }, error: '' },
+      {
+        available: false,
+        value: { reviews: [] },
+        error: 'GBP口コミ: HTTP 500',
+      },
+    );
+    assertEqual_(unknownReviewFailure.status, 'partial');
+    assertEqual_(unknownReviewFailure.reviewStatus, 'unavailable');
+    const performanceFailure = meoConnectionOutcome_(
+      { available: true, value: {}, error: '' },
+      { available: true, value: { hasVoiceOfMerchant: true }, error: '' },
+      { available: true, value: { reviews: [] }, error: '' },
+      {
+        available: false,
+        value: { metrics: {} },
+        error: 'GBP Performance: HTTP 403',
+      },
+    );
+    assertEqual_(performanceFailure.status, 'partial');
+  }, results);
   const failed = results.filter(function (result) {
     return result.status === 'failed';
   });

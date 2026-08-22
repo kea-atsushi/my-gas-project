@@ -14,6 +14,16 @@ const KEA_GBP_EXPECTED = Object.freeze({
   },
 });
 
+const KEA_GBP_PERFORMANCE_METRICS = Object.freeze([
+  'BUSINESS_IMPRESSIONS_DESKTOP_MAPS',
+  'BUSINESS_IMPRESSIONS_DESKTOP_SEARCH',
+  'BUSINESS_IMPRESSIONS_MOBILE_MAPS',
+  'BUSINESS_IMPRESSIONS_MOBILE_SEARCH',
+  'WEBSITE_CLICKS',
+  'CALL_CLICKS',
+  'BUSINESS_DIRECTION_REQUESTS',
+]);
+
 function gbpAccountName_(value) {
   const text = String(value || '').trim();
   if (!text) return '';
@@ -161,6 +171,118 @@ function collectGbpReviews_(accountName, locationName) {
     reviews: reviews,
     totalReviewCount: totalReviewCount,
     averageRating: averageRating,
+  };
+}
+
+function gbpPerformanceSummary_(response) {
+  const totals = {};
+  KEA_GBP_PERFORMANCE_METRICS.forEach(function (metric) {
+    totals[metric] = 0;
+  });
+  ((response && response.multiDailyMetricTimeSeries) || []).forEach(
+    function (group) {
+      (group.dailyMetricTimeSeries || []).forEach(function (series) {
+        const metric = String(series.dailyMetric || '');
+        if (!Object.prototype.hasOwnProperty.call(totals, metric)) return;
+        totals[metric] += ((series.timeSeries &&
+          series.timeSeries.datedValues) || []).reduce(
+          function (sum, item) {
+            return sum + Number(item.value || 0);
+          },
+          0,
+        );
+      });
+    },
+  );
+  return {
+    businessImpressions:
+      totals.BUSINESS_IMPRESSIONS_DESKTOP_MAPS +
+      totals.BUSINESS_IMPRESSIONS_DESKTOP_SEARCH +
+      totals.BUSINESS_IMPRESSIONS_MOBILE_MAPS +
+      totals.BUSINESS_IMPRESSIONS_MOBILE_SEARCH,
+    websiteClicks: totals.WEBSITE_CLICKS,
+    callClicks: totals.CALL_CLICKS,
+    directionRequests: totals.BUSINESS_DIRECTION_REQUESTS,
+  };
+}
+
+function collectGbpPerformance_(locationName) {
+  const endDate = dateDaysAgo_(1);
+  const startDate = dateDaysAgo_(7);
+  const startParts = dateKey_(startDate).split('-');
+  const endParts = dateKey_(endDate).split('-');
+  const parameters = KEA_GBP_PERFORMANCE_METRICS.map(function (metric) {
+    return 'dailyMetrics=' + encodeURIComponent(metric);
+  });
+  [
+    ['dailyRange.start_date.year', startParts[0]],
+    ['dailyRange.start_date.month', startParts[1]],
+    ['dailyRange.start_date.day', startParts[2]],
+    ['dailyRange.end_date.year', endParts[0]],
+    ['dailyRange.end_date.month', endParts[1]],
+    ['dailyRange.end_date.day', endParts[2]],
+  ].forEach(function (item) {
+    parameters.push(
+      encodeURIComponent(item[0]) + '=' + encodeURIComponent(item[1]),
+    );
+  });
+  const response = googleJson_(
+    'https://businessprofileperformance.googleapis.com/v1/' +
+      locationName + ':fetchMultiDailyMetricsTimeSeries?' +
+      parameters.join('&'),
+    { method: 'get' },
+    'GBP Performance fetchMultiDailyMetricsTimeSeries',
+  );
+  return {
+    startDate: dateKey_(startDate),
+    endDate: dateKey_(endDate),
+    metrics: gbpPerformanceSummary_(response),
+  };
+}
+
+function gbpReviewAvailability_(attempt) {
+  if (attempt && attempt.available) {
+    return { status: 'available', reason: '' };
+  }
+  const reason = String(
+    attempt && attempt.error || 'GBP口コミ: 取得できませんでした。',
+  );
+  const isLegacyReviewService =
+    /(mybusiness\.googleapis\.com|Google My Business API)/i.test(reason);
+  const isServiceAvailabilityError =
+    /(403|SERVICE_DISABLED|has not been used|disabled|accessNotConfigured)/i
+      .test(reason);
+  return {
+    status:
+      isLegacyReviewService && isServiceAvailabilityError
+        ? 'unavailable/pending'
+        : 'unavailable',
+    reason: reason,
+  };
+}
+
+function meoConnectionOutcome_(attributes, voice, reviews, performance) {
+  const reviewAvailability = gbpReviewAvailability_(reviews);
+  const blockingErrors = [
+    attributes && attributes.error,
+    voice && voice.error,
+    performance && performance.error,
+  ].filter(Boolean);
+  if (reviewAvailability.status === 'unavailable') {
+    blockingErrors.push(reviewAvailability.reason);
+  }
+  const notices = [
+    attributes && attributes.error,
+    voice && voice.error,
+    performance && performance.error,
+    reviewAvailability.reason,
+  ].filter(Boolean);
+  return {
+    status: blockingErrors.length ? 'partial' : 'connected',
+    reason: notices.join(' / '),
+    blockingReason: blockingErrors.join(' / '),
+    reviewStatus: reviewAvailability.status,
+    reviewReason: reviewAvailability.reason,
   };
 }
 
@@ -319,6 +441,16 @@ function gbpSetupAction_(reason) {
   return 'Google CloudのAPI利用許可、OAuth権限、GBP_ACCOUNT_ID、GBP_LOCATION_IDを確認します。';
 }
 
+function gbpReviewSetupAction_(outcome) {
+  if (outcome.blockingReason) {
+    return gbpSetupAction_(outcome.blockingReason);
+  }
+  if (outcome.reviewStatus !== 'unavailable/pending') {
+    return gbpSetupAction_(outcome.reason);
+  }
+  return 'Google Cloud kea-growth-ops-apiでmybusiness.googleapis.comの有効状態、承認アカウントからのAPI Library表示、Service Usage制約を確認します。口コミ監視のみunavailable/pendingとして、他の監視を継続します。';
+}
+
 function writeGbpConnection_(state) {
   appendHealthRow_('GbpConnection', [
     state.checkedAt,
@@ -431,6 +563,7 @@ function runMeoHealthAuditCore_(config, merchantResult) {
     appendHealthRow_('MEOHealth', [
       checkedAt, 'needs_setup', '', '', '', '', '', '', '', '', '', '',
       '', '', '', '', false, false, false, 'unknown', '接続設定待ち', manualAction,
+      '', '', '', '', '', '', '', '', '',
     ]);
     return {
       source: 'MEO',
@@ -482,6 +615,18 @@ function runMeoHealthAuditCore_(config, merchantResult) {
   const reviews = healthAttempt_('GBP口コミ', function () {
     return collectGbpReviews_(configuredAccount, configuredLocation);
   }, { reviews: [], totalReviewCount: null, averageRating: null });
+  const performance = healthAttempt_('GBP Performance', function () {
+    return collectGbpPerformance_(configuredLocation);
+  }, {
+    startDate: '',
+    endDate: '',
+    metrics: {
+      businessImpressions: null,
+      websiteClicks: null,
+      callClicks: null,
+      directionRequests: null,
+    },
+  });
   const comparison = compareGbpLocation_(location);
   const unanswered = reviews.available
     ? unansweredGbpReviews_(reviews.value.reviews)
@@ -519,8 +664,13 @@ function runMeoHealthAuditCore_(config, merchantResult) {
     unanswered,
     localLink,
   );
-  const errors = [attributes.error, voice.error, reviews.error].filter(Boolean);
-  const connectionStatus = errors.length ? 'partial' : 'connected';
+  const connection = meoConnectionOutcome_(
+    attributes,
+    voice,
+    reviews,
+    performance,
+  );
+  const connectionStatus = connection.status;
   const reviewCount = reviews.available
     ? reviews.value.totalReviewCount
     : null;
@@ -541,6 +691,14 @@ function runMeoHealthAuditCore_(config, merchantResult) {
     unansweredReviewIds: unanswered.map(function (review) {
       return review.reviewId || review.name || review.updateTime || '';
     }),
+    reviewsStatus: connection.reviewStatus,
+    reviewsReason: connection.reviewReason,
+    performanceStatus: performance.available ? 'available' : 'unavailable',
+    performancePeriod:
+      performance.available
+        ? performance.value.startDate + '..' + performance.value.endDate
+        : '',
+    performance: performance.value.metrics,
     localInventoryLinkStatus: localLink.status,
   };
   const notificationIssues = [];
@@ -568,15 +726,21 @@ function runMeoHealthAuditCore_(config, merchantResult) {
     location.categories && location.categories.primaryCategory || {};
   const additionalCategories =
     location.categories && location.categories.additionalCategories || [];
-  const manualActions = errors.slice();
+  const manualActions = [
+    connection.blockingReason,
+    connection.reviewStatus === 'unavailable/pending'
+      ? '口コミ監視: unavailable/pending / ' + connection.reviewReason
+      : '',
+  ].filter(Boolean);
   writeGbpConnection_({
     checkedAt: checkedAt,
     status: connectionStatus,
-    reason: errors.join(' / '),
+    reason: connection.reason,
     accountId: configuredAccount,
     locationId: configuredLocation,
     candidates: [],
-    manualAction: errors.length ? gbpSetupAction_(errors.join(' / ')) : '',
+    manualAction:
+      connection.reason ? gbpReviewSetupAction_(connection) : '',
   });
   appendHealthRow_('MEOHealth', [
     checkedAt,
@@ -607,12 +771,23 @@ function runMeoHealthAuditCore_(config, merchantResult) {
         }).join(', ')
       : '差異なし',
     manualActions.join(' / '),
+    connection.reviewStatus,
+    connection.reviewReason,
+    performance.available ? 'available' : 'unavailable',
+    performance.available
+      ? performance.value.startDate + '..' + performance.value.endDate
+      : '',
+    performance.available ? performance.value.metrics.businessImpressions : '',
+    performance.available ? performance.value.metrics.websiteClicks : '',
+    performance.available ? performance.value.metrics.callClicks : '',
+    performance.available ? performance.value.metrics.directionRequests : '',
+    performance.error,
   ]);
   return {
     source: 'MEO',
     available: true,
     connectionStatus: connectionStatus,
-    reason: errors.join(' / '),
+    reason: connection.reason,
     state: state,
     recommendations: recommendations,
     notificationIssues: notificationIssues,
