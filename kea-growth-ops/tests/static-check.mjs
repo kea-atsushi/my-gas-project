@@ -233,6 +233,21 @@ const dashboardScript = dashboard.match(/<script>([\s\S]*?)<\/script>/);
 assert.ok(dashboardScript, "dashboard script must exist");
 new vm.Script(dashboardScript[1], { filename: "Dashboard.inline.js" });
 
+const originalReadDashboardData = context.readDashboardData_;
+context.readDashboardData_ = () => ({
+  generatedAt: new Date("2026-08-23T00:00:00.000Z"),
+  nested: {
+    updatedAt: new Date("2026-08-23T00:01:00.000Z"),
+  },
+});
+const clientDashboard = context.getDashboardData();
+assert.equal(clientDashboard.generatedAt, "2026-08-23T00:00:00.000Z");
+assert.equal(
+  clientDashboard.nested.updatedAt,
+  "2026-08-23T00:01:00.000Z",
+);
+context.readDashboardData_ = originalReadDashboardData;
+
 assert.equal(context.safeDivide_(100, 0), 0);
 const productAudit = context.auditShopifyProductSeo_(
   {
@@ -1040,7 +1055,7 @@ console.log(
     {
       status: "passed",
       gasFiles: gasFiles.length,
-      checks: 141,
+      checks: 143,
       gasUnitTests: gasUnitResults.length,
     },
     null,
