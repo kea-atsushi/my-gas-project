@@ -18,5 +18,5 @@ function doGet(event) {
 }
 
 function getDashboardData() {
-  return readDashboardData_();
+  return JSON.parse(JSON.stringify(readDashboardData_()));
 }
