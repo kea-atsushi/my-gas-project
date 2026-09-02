@@ -37,6 +37,8 @@ const KEA_HEALTH_SHEETS = Object.freeze({
     'oldUrls',
     'changeSummary',
     'manualAction',
+    'brandCount',
+    'brandSummary',
   ],
   MEOHealth: [
     'checkedAt',
@@ -117,8 +119,7 @@ function ensureHealthSheets_() {
       .setBackground('#111111')
       .setFontColor('#ffffff')
       .setFontWeight('bold');
-    sheet.setRowHeight(1, 28);
-    sheet.getDataRange().setWrap(true);
+    sheet.setRowHeight(1, 28);    sheet.getDataRange().setWrap(true);
   });
   return spreadsheet;
 }
@@ -237,8 +238,7 @@ function healthConnectionEvents_(source, result) {
   const properties = PropertiesService.getScriptProperties();
   const streakKey = 'KEA_HEALTH_FAILURE_STREAK_' + source;
   const currentStreak = Number(properties.getProperty(streakKey) || 0);
-  if (source === 'SHOPIFY_SKU' && result && result.inProgress) {
-    return [];
+  if (source === 'SHOPIFY_SKU' && result && result.inProgress) {    return [];
   }
   if (result && result.available) {
     properties.deleteProperty(streakKey);
@@ -357,8 +357,7 @@ function healthSourceEvents_(source, result) {
 
 function sendHealthChangeNotification_(events, results) {
   if (!events || !events.length) {
-    return { status: 'skipped', reason: '状態変化なし' };
-  }
+    return { status: 'skipped', reason: '状態変化なし' };  }
   const config = keaConfig_();
   const emails = String(config.REPORT_EMAILS || '')
     .split(',')
@@ -477,8 +476,7 @@ function runHealthMonitorSafely_(source, callback) {
 function finishHealthResults_(results) {
   const events = [];
   Object.keys(results).forEach(function (source) {
-    const result = results[source];
-    if (!(source === 'SHOPIFY_SKU' && result && result.inProgress)) {
+    const result = results[source];    if (!(source === 'SHOPIFY_SKU' && result && result.inProgress)) {
       queueHealthRecommendations_(source, result.recommendations || []);
     }
     events.push.apply(events, healthSourceEvents_(source, result));
@@ -597,8 +595,7 @@ function buildWeeklyHealthSummary_() {
     return value === '' || value === null || typeof value === 'undefined'
       ? fallback
       : value;
-  };
-  return [
+  };  return [
     '',
     '',
     'SEO・MEO・Merchant現在値',

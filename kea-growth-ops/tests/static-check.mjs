@@ -117,8 +117,7 @@ for (const required of [
   "custom\", key: \"product_code",
   "selectedOptions",
 ]) {
-  assert.ok(allSource.includes(required), `missing required behavior: ${required}`);
-}
+  assert.ok(allSource.includes(required), `missing required behavior: ${required}`);}
 assert.ok(
   !/OPENAI_API_KEY\s*[:=]\s*['"][^'"]+['"]/.test(allSource),
   "OpenAI key must not be committed",
@@ -237,8 +236,7 @@ const originalReadDashboardData = context.readDashboardData_;
 context.readDashboardData_ = () => ({
   generatedAt: new Date("2026-08-23T00:00:00.000Z"),
   nested: {
-    updatedAt: new Date("2026-08-23T00:01:00.000Z"),
-  },
+    updatedAt: new Date("2026-08-23T00:01:00.000Z"),  },
 });
 const clientDashboard = context.getDashboardData();
 assert.equal(clientDashboard.generatedAt, "2026-08-23T00:00:00.000Z");
@@ -357,8 +355,7 @@ function createSkuPublishWorkbook_(failPublishOnce) {
     );
     let formulas = Array.from({ length: maxRows }, () =>
       Array(maxColumns).fill(""),
-    );
-    const chart = { id: `${name}-chart` };
+    );    const chart = { id: `${name}-chart` };
     const protection = { id: `${name}-protection` };
 
     function addRows_(count) {
@@ -477,8 +474,7 @@ function createSkuPublishWorkbook_(failPublishOnce) {
                 (_, columnOffset) =>
                   values[firstRow + rowOffset][firstColumn + columnOffset],
               ),
-            );
-          },
+            );          },
           getValue() {
             return this.getValues()[0][0];
           },
@@ -597,8 +593,7 @@ function createScriptProperties_(initialValues) {
 const originalDashboardSpreadsheet = context.getDashboardSpreadsheet_;
 const originalPropertiesService = context.PropertiesService;
 const originalSpreadsheetApp = context.SpreadsheetApp;
-try {
-  const successWorkbook = createSkuPublishWorkbook_(false);
+try {  const successWorkbook = createSkuPublishWorkbook_(false);
   const successProperties = createScriptProperties_({
     KEA_SHOPIFY_SKU_LIVE_ROW_COUNT: "3",
   });
@@ -717,8 +712,7 @@ try {
   const skippedHealth = context.runGrowthHealthWatchCore_(
     false,
     Date.now() + 330000,
-  );
-  assert.equal(skippedHealth.status, "skipped");
+  );  assert.equal(skippedHealth.status, "skipped");
   assert.deepEqual(recoveryWorkbook.live.snapshot(3, 20), expectedRecovery);
   assert.equal(
     recoveryProperties.values.has("KEA_SHOPIFY_SKU_PUBLISH_WAL_V1"),
@@ -837,8 +831,7 @@ const merchantIncrease = context.merchantChangeEvents_(
   {
     totalProducts: 7,
     approved: 0,
-    pending: 0,
-    disapproved: 7,
+    pending: 0,    disapproved: 7,
     limited: 0,
   },
 );
@@ -861,7 +854,11 @@ assert.equal(
   true,
 );
 assert.equal(
-  context.seoCtrCandidate_({ impressions: 30, ctr: 0.019 }),
+  context.seoCtrCandidate_({ impressions: 30, ctr: 0.019, position: 12 }),
+  false,
+);
+assert.equal(
+  context.seoCtrCandidate_({ impressions: 100, ctr: 0.019, position: 12 }),
   true,
 );
 assert.equal(context.meoConnectionState_("", true, "").available, false);
@@ -957,8 +954,7 @@ context.healthWriteJsonProperty_("KEA_HEALTH_STATE_SHOPIFY_SKU", {
   issueVariantCount: 10,
   skuBlankCount: 2,
   skuFormatCount: 3,
-  duplicateSkuCount: 1,
-  duplicateProductCodeCount: 1,
+  duplicateSkuCount: 1,  duplicateProductCodeCount: 1,
   productCodeMissingCount: 4,
   optionIssueCount: 5,
 });

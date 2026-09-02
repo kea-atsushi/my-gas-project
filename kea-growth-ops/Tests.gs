@@ -811,10 +811,23 @@ function runKeaGrowthUnitTests() {
     );
     assertEqual_(isOldKeaUrl_('https://store.kea.co.jp/collections/all'), false);
   }, results);
-  test_('low CTR candidate follows threshold', function () {
-    assertEqual_(seoCtrCandidate_({ impressions: 30, ctr: 0.019 }), true);
-    assertEqual_(seoCtrCandidate_({ impressions: 29, ctr: 0.019 }), false);
-    assertEqual_(seoCtrCandidate_({ impressions: 30, ctr: 0.02 }), false);
+  test_('low CTR candidate requires meaningful search data', function () {
+    assertEqual_(
+      seoCtrCandidate_({ impressions: 30, ctr: 0.019, position: 12 }),
+      false,
+    );
+    assertEqual_(
+      seoCtrCandidate_({ impressions: 100, ctr: 0.019, position: 12 }),
+      true,
+    );
+    assertEqual_(
+      seoCtrCandidate_({ impressions: 100, ctr: 0.02, position: 12 }),
+      false,
+    );
+    assertEqual_(
+      seoCtrCandidate_({ impressions: 100, ctr: 0.019, position: 21 }),
+      false,
+    );
   }, results);
   test_('GBP without location ID is not connected', function () {
     const state = meoConnectionState_('', true, '');
