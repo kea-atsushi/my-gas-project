@@ -12,6 +12,12 @@ const KEA_BRAND_SEO_EXCLUDED_VENDOR_NAMES = Object.freeze([
   'ダミー',
   'サンプル',
 ]);
+const KEA_BRAND_SEO_COLLECTION_HANDLE_BY_VENDOR = Object.freeze({
+  'Agapantha Jewelry': 'agapantha',
+  'Button Works': 'buttonworks',
+  "LEVI'S": 'levis',
+  'kit・sch': 'kitsch',
+});
 
 function brandSeoText_(value) {
   return String(value === undefined || value === null ? '' : value).trim();
@@ -25,6 +31,8 @@ function brandSeoExcludedVendor_(vendor) {
 function brandSeoSuggestedHandle_(vendor) {
   const source = brandSeoText_(vendor);
   if (!source) return '';
+  const verifiedHandle = KEA_BRAND_SEO_COLLECTION_HANDLE_BY_VENDOR[source];
+  if (verifiedHandle) return verifiedHandle;
   const normalized = typeof source.normalize === 'function'
     ? source.normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
     : source;

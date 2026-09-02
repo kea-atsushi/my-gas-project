@@ -829,6 +829,52 @@ function runKeaGrowthUnitTests() {
       false,
     );
   }, results);
+  test_('brand SEO uses only verified existing collection handles', function () {
+    assertEqual_(brandSeoSuggestedHandle_('Agapantha Jewelry'), 'agapantha');
+    assertEqual_(brandSeoSuggestedHandle_('Button Works'), 'buttonworks');
+    assertEqual_(brandSeoSuggestedHandle_('kit・sch'), 'kitsch');
+    assertEqual_(brandSeoSuggestedHandle_("LEVI'S"), 'levis');
+    assertEqual_(brandSeoSuggestedHandle_('select'), 'select');
+
+    const agapantha = brandSeoConfiguration_(
+      {
+        vendor: 'Agapantha Jewelry',
+        productCount: 4,
+        productHandles: ['sample'],
+      },
+      [{
+        id: 'collection-agapantha',
+        handle: 'agapantha',
+        descriptionHtml: '<p>AGAPANTHA</p>',
+        seo: { title: 'AGAPANTHA', description: 'AGAPANTHA collection' },
+        ruleSet: {
+          rules: [{ column: 'VENDOR', relation: 'EQUALS', condition: 'AGAPANTHA' }],
+        },
+      }],
+    );
+    assertEqual_(agapantha.collection.handle, 'agapantha');
+    assertTrue_(agapantha.issues.indexOf('Vendor条件未確認') >= 0);
+    assertTrue_(agapantha.issues.indexOf('ブランドCollectionなし') < 0);
+    assertTrue_(agapantha.issues.indexOf('handle要確認') < 0);
+
+    const buttonWorks = brandSeoConfiguration_(
+      {
+        vendor: 'Button Works',
+        productCount: 2,
+        productHandles: ['sample'],
+      },
+      [{
+        id: 'collection-buttonworks',
+        handle: 'buttonworks',
+        descriptionHtml: '<p>Button Works</p>',
+        seo: { title: 'Button Works', description: 'Button Works collection' },
+        ruleSet: {
+          rules: [{ column: 'VENDOR', relation: 'EQUALS', condition: 'Button Works' }],
+        },
+      }],
+    );
+    assertEqual_(buttonWorks.issues.length, 0);
+  }, results);
   test_('GBP without location ID is not connected', function () {
     const state = meoConnectionState_('', true, '');
     assertEqual_(state.available, false);
