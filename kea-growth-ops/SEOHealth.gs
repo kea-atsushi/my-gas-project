@@ -8,7 +8,17 @@ const KEA_OLD_EC_URLS = [
   'https://www.kea.co.jp/store/',
   'https://www.kea.co.jp/store/products/',
   'https://www.kea.co.jp/store/products/list.php',
+  'https://www.kea.co.jp/store/products/list.php?category_id=526',
 ];
+
+/**
+ * 旧ECの対応先を実確認できたURLだけを保持します。
+ * 未確認URLをトップページへ一括転送する提案は行いません。
+ */
+const KEA_OLD_EC_REDIRECT_TARGETS = Object.freeze({
+  'https://www.kea.co.jp/store/products/list.php?category_id=526':
+    'https://store.kea.co.jp/collections/oblada',
+});
 
 function searchConsoleAnalytics_(
   config,
@@ -117,7 +127,6 @@ function collectRepresentativeShopifyUrl_(config) {
   if (!product) throw new Error('公開中の商品URLを取得できませんでした。');
   return product.onlineStoreUrl;
 }
-
 function absoluteRedirectUrl_(sourceUrl, location) {
   const value = String(location || '').trim();
   if (!value) return '';
@@ -174,11 +183,20 @@ function isOldKeaUrl_(url) {
   );
 }
 
+function oldEcRedirectTarget_(url) {
+  return KEA_OLD_EC_REDIRECT_TARGETS[String(url || '')] || '';
+}
+
+/**
+ * 少量表示での即時Title変更提案を防ぐため、十分な表示と順位がある場合だけ候補化します。
+ */
 function seoCtrCandidate_(row) {
   return Boolean(
     row &&
-    Number(row.impressions || 0) >= 30 &&
-    Number(row.ctr || 0) < 0.02,
+    Number(row.impressions || 0) >= 100 &&
+    Number(row.ctr || 0) < 0.02 &&
+    Number(row.position || 0) > 0 &&
+    Number(row.position || 0) <= 20,
   );
 }
 
@@ -237,8 +255,7 @@ function seoRecommendationsFromAudit_(audit) {
         healthRecommendation_(
           'SEO',
           'ctr-page|' + page,
-          'SEO改善',
-          Number(row.position || 0) <= 15 ? '高' : '中',
+          'SEO改善',          Number(row.position || 0) <= 15 ? '高' : '中',
           page,
           '表示 ' + row.impressions + ' / CTR ' + percent_(row.ctr) +
             ' / 順位 ' + decimal_(row.position),
@@ -314,23 +331,12 @@ function seoRecommendationsFromAudit_(audit) {
       );
     }
   });
-  if ((audit.oldUrls || []).length) {
-    recommendations.push(
-      healthRecommendation_(
-        'SEO',
-        'old-ec-search-results',
-        '旧EC残存',
-        '高',
-        'www.kea.co.jp/store/',
-        audit.oldUrls.join(' / '),
-        '旧URLから対応するShopify URLへの301転送候補を確認します。',
-      ),
-    );
-  }
+  // www.kea.co.jpは通常のTitle・Meta改善候補から除外し、旧URL・301・404の監視専用とします。
   (audit.oldHttp || []).forEach(function (item) {
+    const expectedTarget = oldEcRedirectTarget_(item.url);
+    if (!expectedTarget) return;
     const permanent = item.status === 301 || item.status === 308;
-    const destinationOk = String(item.location || '')
-      .indexOf('https://store.kea.co.jp/') === 0;
+    const destinationOk = String(item.location || '') === expectedTarget;
     if (permanent && destinationOk) return;
     recommendations.push(
       healthRecommendation_(
@@ -339,8 +345,9 @@ function seoRecommendationsFromAudit_(audit) {
         '301転送',
         '高',
         item.url,
-        'HTTP ' + item.status + ' / 転送先 ' + (item.location || 'なし'),
-        '旧EC URLを対応するShopify URLへ恒久転送する候補を確認します。',
+        'HTTP ' + item.status + ' / 転送先 ' + (item.location || 'なし') +
+          ' / 正しい転送先 ' + expectedTarget,
+        '旧ObladaページをOblada Collectionへ301または308で恒久転送する候補を確認します。',
       ),
     );
   });
@@ -357,8 +364,7 @@ function runSeoHealthAuditCore_(config) {
     return searchConsoleAnalytics_(
       config, currentStart, currentEnd, [], 1,
     );
-  }, []);
-  const previous = healthAttempt_('前7日', function () {
+  }, []);  const previous = healthAttempt_('前7日', function () {
     return searchConsoleAnalytics_(
       config, previousStart, previousEnd, [], 1,
     );
@@ -438,7 +444,17 @@ function runSeoHealthAuditCore_(config) {
     oldUrls: oldUrls,
     oldHttp: oldHttp,
   };
-  const recommendations = seoRecommendationsFromAudit_(audit);
+  const brandAudit = healthAttempt_('ブランドSEO', function () {
+    return runBrandSeoHealthAudit_(config, audit, { force: false });
+  }, {
+    available: false,
+    recommendations: [],
+    notificationIssues: [],
+    summary: { brandCount: 0, setupCandidates: 0, issueCount: 0 },
+  });
+  const recommendations = seoRecommendationsFromAudit_(audit).concat(
+    brandAudit.value && brandAudit.value.recommendations || [],
+  );
   const errors = [
     current.error,
     previous.error,
@@ -447,6 +463,7 @@ function runSeoHealthAuditCore_(config) {
     devices.error,
     sitemapAttempt.error,
     representative.error,
+    brandAudit.error,
   ].filter(Boolean);
   majorResults.forEach(function (item) {
     if (item.error) errors.push(item.url + ': ' + item.error);
@@ -477,8 +494,7 @@ function runSeoHealthAuditCore_(config) {
       key: 'SEO|click-drop-30',
       text: 'SEOクリックが前期間比' + percent_(clickChangePct) + 'です。',
     });
-  }
-  const state = {
+  }  const state = {
     connectionStatus: current.available
       ? errors.length ? 'partial' : 'connected'
       : 'failed',
@@ -491,6 +507,7 @@ function runSeoHealthAuditCore_(config) {
       ? sitemapAttempt.value.errors
       : null,
     oldUrlCount: pages.available ? oldRows.length : null,
+    brandSummary: brandAudit.value && brandAudit.value.summary || null,
     majorUrls: majorResults.map(function (item) {
       return {
         url: item.url,
@@ -530,6 +547,12 @@ function runSeoHealthAuditCore_(config) {
     oldUrls.join(' / '),
     changeSummary.length ? changeSummary.join(' / ') : '変化なし',
     errors.join(' / ').slice(0, 5000),
+    brandAudit.value && brandAudit.value.summary
+      ? brandAudit.value.summary.brandCount
+      : '',
+    brandAudit.value && brandAudit.value.summary
+      ? JSON.stringify(brandAudit.value.summary)
+      : '',
   ]);
   return {
     source: 'SEO',
