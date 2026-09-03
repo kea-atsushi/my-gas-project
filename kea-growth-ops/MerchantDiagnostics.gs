@@ -225,11 +225,7 @@ function collectMerchantAccountIssues_(accountId) {
   let pageToken = '';
   try {
     do {
-      let url =
-        'https://merchantapi.googleapis.com/accounts/v1/accounts/' +
-        accountId +
-        '/issues?language_code=ja-JP&time_zone.id=Asia%2FTokyo&page_size=1000';
-      if (pageToken) url += '&page_token=' + encodeURIComponent(pageToken);
+      const url = merchantAccountIssuesUrl_(accountId, pageToken);
       const response = googleJson_(
         url,
         { method: 'get' },
@@ -247,6 +243,17 @@ function collectMerchantAccountIssues_(accountId) {
       error: String(error && error.message || error),
     };
   }
+}
+
+function merchantAccountIssuesUrl_(accountId, pageToken) {
+  let url =
+    'https://merchantapi.googleapis.com/accounts/v1/accounts/' +
+    accountId +
+    '/issues?language_code=ja-JP&time_zone=' +
+    encodeURIComponent('Asia/Tokyo') +
+    '&page_size=100';
+  if (pageToken) url += '&page_token=' + encodeURIComponent(pageToken);
+  return url;
 }
 
 function merchantResolutionProductId_(productId) {

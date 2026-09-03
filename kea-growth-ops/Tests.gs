@@ -778,6 +778,15 @@ function runKeaGrowthUnitTests() {
     );
     assertEqual_(newItems.length, 0);
   }, results);
+  test_('Merchant account issue URL uses the current query schema', function () {
+    const url = merchantAccountIssuesUrl_('12345', 'next/token');
+    assertTrue_(url.indexOf('/accounts/12345/issues?') >= 0);
+    assertTrue_(url.indexOf('language_code=ja-JP') >= 0);
+    assertTrue_(url.indexOf('time_zone=Asia%2FTokyo') >= 0);
+    assertTrue_(url.indexOf('page_size=100') >= 0);
+    assertTrue_(url.indexOf('page_token=next%2Ftoken') >= 0);
+    assertEqual_(url.indexOf('time_zone.id='), -1);
+  }, results);
   test_('PENDING_PROCESSING is not an immediate action', function () {
     assertEqual_(
       merchantIssueNeedsAction_({ resolution: 'PENDING_PROCESSING' }),
