@@ -7,7 +7,9 @@ const KEA_BRAND_SEO_WEEKLY_STATE_KEY = 'KEA_BRAND_SEO_WEEKLY_STATE_V1';
 const KEA_BRAND_SEO_EXCLUDED_VENDOR_NAMES = Object.freeze([
   'test',
   'dummy',
+  'import',
   'sample',
+  'select',
   'テスト',
   'ダミー',
   'サンプル',

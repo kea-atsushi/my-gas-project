@@ -875,6 +875,33 @@ function runKeaGrowthUnitTests() {
     );
     assertEqual_(buttonWorks.issues.length, 0);
   }, results);
+  test_('brand SEO excludes legacy mixed-vendor buckets', function () {
+    const rows = brandSeoActiveVendorRows_([
+      {
+        vendor: 'import',
+        status: 'ACTIVE',
+        publishedAt: '2026-09-03T00:00:00Z',
+        onlineStoreUrl: 'https://store.kea.co.jp/products/import-sample',
+        handle: 'import-sample',
+      },
+      {
+        vendor: 'select',
+        status: 'ACTIVE',
+        publishedAt: '2026-09-03T00:00:00Z',
+        onlineStoreUrl: 'https://store.kea.co.jp/products/select-sample',
+        handle: 'select-sample',
+      },
+      {
+        vendor: 'Oblada',
+        status: 'ACTIVE',
+        publishedAt: '2026-09-03T00:00:00Z',
+        onlineStoreUrl: 'https://store.kea.co.jp/products/oblada-sample',
+        handle: 'oblada-sample',
+      },
+    ]);
+    assertEqual_(rows.length, 1);
+    assertEqual_(rows[0].vendor, 'Oblada');
+  }, results);
   test_('GBP without location ID is not connected', function () {
     const state = meoConnectionState_('', true, '');
     assertEqual_(state.available, false);
