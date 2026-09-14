@@ -101,7 +101,6 @@ Secret登録後の配備手順:
 | `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET` | いずれか | Client Credentialsを使う場合 |
 | `GA4_PROPERTY_ID` | 必須 | 数字だけ |
 | `GOOGLE_ADS_CUSTOMER_ID` | 必須 | ハイフンなし |
-| `GOOGLE_ADS_DEVELOPER_TOKEN` | 必須 | Google Ads API |
 | `GOOGLE_ADS_LOGIN_CUSTOMER_ID` | 任意 | MCC経由時 |
 | `MERCHANT_ACCOUNT_ID` | 必須 | Merchant Center ID |
 | `MERCHANT_DATA_SOURCE_ID` | 任意 | ファイル型データソースを即時再取得する場合 |
@@ -116,6 +115,8 @@ Secret登録後の配備手順:
 | `TARGET_CPA` | 任意 | 週次提案の基準 |
 | `TARGET_ROAS` | 任意 | 週次提案の基準 |
 | `ADS_MUTATION_MODE` | 固定推奨 | `QUEUE_ONLY` |
+
+Google Ads APIのアクセスレベルは、OAuth認証情報を所有する標準Google Cloudプロジェクト`kea-growth-ops-api`（プロジェクト番号`119772560648`）で管理します。APIリクエストはOAuth認証と、MCC経由の場合だけ`login-customer-id`を使用します。
 
 ## 定期実行
 

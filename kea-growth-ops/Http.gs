@@ -119,18 +119,12 @@ function shopifyGraphql_(config, query, variables, label) {
 }
 
 function googleAdsSearch_(config, query) {
-  if (
-    !configured_(config, [
-      'GOOGLE_ADS_CUSTOMER_ID',
-      'GOOGLE_ADS_DEVELOPER_TOKEN',
-    ])
-  ) {
+  if (!configured_(config, ['GOOGLE_ADS_CUSTOMER_ID'])) {
     return { available: false, reason: 'Google Ads設定未完了', rows: [] };
   }
   const customerId = String(config.GOOGLE_ADS_CUSTOMER_ID).replace(/\D/g, '');
   const headers = {
     Authorization: 'Bearer ' + ScriptApp.getOAuthToken(),
-    'developer-token': String(config.GOOGLE_ADS_DEVELOPER_TOKEN).trim(),
   };
   if (String(config.GOOGLE_ADS_LOGIN_CUSTOMER_ID || '').trim()) {
     headers['login-customer-id'] = String(

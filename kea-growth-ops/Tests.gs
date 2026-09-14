@@ -1063,7 +1063,6 @@ function testGoogleAdsConnection() {
     const config = keaConfig_();
     const requiredKeys = [
       'GOOGLE_ADS_CUSTOMER_ID',
-      'GOOGLE_ADS_DEVELOPER_TOKEN',
       'GOOGLE_ADS_LOGIN_CUSTOMER_ID',
     ];
     if (!configured_(config, requiredKeys)) {
