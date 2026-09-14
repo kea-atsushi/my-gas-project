@@ -168,7 +168,6 @@ function writeConfigGuide_(spreadsheetId) {
     ['SHOPIFY_CLIENT_SECRET', '', 'いずれか', 'Shopify Client Credentials'],
     ['GA4_PROPERTY_ID', '', '必須', 'GA4数値プロパティID'],
     ['GOOGLE_ADS_CUSTOMER_ID', '', '必須', 'ハイフンなし'],
-    ['GOOGLE_ADS_DEVELOPER_TOKEN', '', '必須', 'Google Ads API開発者トークン'],
     ['GOOGLE_ADS_LOGIN_CUSTOMER_ID', '', '任意', 'MCC経由時のみ。ハイフンなし'],
     ['MERCHANT_ACCOUNT_ID', '', '必須', 'Merchant Center ID'],
     ['MERCHANT_DATA_SOURCE_ID', '', '任意', 'ファイル型データソースを即時取得する場合'],

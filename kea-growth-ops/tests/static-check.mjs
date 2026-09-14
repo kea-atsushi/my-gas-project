@@ -126,6 +126,75 @@ assert.ok(
   !/SHOPIFY_ADMIN_ACCESS_TOKEN\s*[:=]\s*['"][^'"]+['"]/.test(allSource),
   "Shopify token must not be committed",
 );
+const googleAdsHttpSource = fs.readFileSync(
+  path.join(root, "Http.gs"),
+  "utf8",
+);
+assert.ok(
+  !googleAdsHttpSource.includes(["developer", "token"].join("-")),
+  "Google Ads requests must use Cloud-project access without the legacy header",
+);
+assert.ok(
+  !allSource.includes(["GOOGLE", "ADS", "DEVELOPER", "TOKEN"].join("_")),
+  "Google Ads configuration must not require the legacy token",
+);
+const originalScriptApp = context.ScriptApp;
+const originalUrlFetchApp = context.UrlFetchApp;
+const googleAdsRequests = [];
+context.ScriptApp = {
+  getOAuthToken() {
+    return "oauth-access-token";
+  },
+};
+context.UrlFetchApp = {
+  fetch(url, options) {
+    googleAdsRequests.push({ url, options });
+    return {
+      getResponseCode() {
+        return 200;
+      },
+      getContentText() {
+        return JSON.stringify([
+          { results: [{ customer: { id: "1234567890" } }] },
+        ]);
+      },
+    };
+  },
+};
+const googleAdsResult = context.googleAdsSearch_(
+  {
+    GOOGLE_ADS_CUSTOMER_ID: "123-456-7890",
+    GOOGLE_ADS_LOGIN_CUSTOMER_ID: "987-654-3210",
+    GOOGLE_ADS_API_VERSION: "v25",
+  },
+  "SELECT customer.id FROM customer LIMIT 1",
+);
+assert.equal(googleAdsResult.available, true);
+assert.equal(googleAdsResult.rows[0].customer.id, "1234567890");
+assert.equal(googleAdsRequests.length, 1);
+assert.equal(
+  googleAdsRequests[0].url,
+  "https://googleads.googleapis.com/v25/customers/1234567890/googleAds:searchStream",
+);
+assert.equal(
+  googleAdsRequests[0].options.headers.Authorization,
+  "Bearer oauth-access-token",
+);
+assert.equal(
+  googleAdsRequests[0].options.headers["login-customer-id"],
+  "9876543210",
+);
+assert.equal(
+  Object.prototype.hasOwnProperty.call(
+    googleAdsRequests[0].options.headers,
+    ["developer", "token"].join("-"),
+  ),
+  false,
+);
+if (originalScriptApp === undefined) delete context.ScriptApp;
+else context.ScriptApp = originalScriptApp;
+if (originalUrlFetchApp === undefined) delete context.UrlFetchApp;
+else context.UrlFetchApp = originalUrlFetchApp;
 const skuReadOnlySource = [
   fs.readFileSync(path.join(root, "Collectors.gs"), "utf8"),
   fs.readFileSync(path.join(root, "ShopifySkuHealth.gs"), "utf8"),
@@ -1051,7 +1120,7 @@ console.log(
     {
       status: "passed",
       gasFiles: gasFiles.length,
-      checks: 143,
+      checks: 152,
       gasUnitTests: gasUnitResults.length,
     },
     null,
