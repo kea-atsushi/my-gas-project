@@ -97,26 +97,26 @@ function upsertDailySnapshot_(snapshot, report, status) {
   const sheet = getDashboardSpreadsheet_().getSheetByName('Daily');
   const row = [
     snapshot.periodEnd,
-    snapshot.shopifySales,
-    snapshot.shopifyOrders,
+    snapshot.shopifySales === null ? '' : snapshot.shopifySales,
+    snapshot.shopifyOrders === null ? '' : snapshot.shopifyOrders,
     snapshot.estimatedCogs === null ? '' : snapshot.estimatedCogs,
-    snapshot.adCost,
+    snapshot.adCost === null ? '' : snapshot.adCost,
     snapshot.contributionProfit === null
       ? ''
       : snapshot.contributionProfit,
-    snapshot.roas,
+    snapshot.roas === null ? '' : snapshot.roas,
     snapshot.cpa === null ? '' : snapshot.cpa,
-    snapshot.conversions,
-    snapshot.ctr,
-    snapshot.cpc,
-    snapshot.ga4Sessions,
-    snapshot.ga4Revenue,
-    snapshot.gscClicks,
-    snapshot.gscImpressions,
-    snapshot.gscCtr,
-    snapshot.gscPosition,
-    snapshot.merchantApproved,
-    snapshot.merchantDisapproved,
+    snapshot.conversions === null ? '' : snapshot.conversions,
+    snapshot.ctr === null ? '' : snapshot.ctr,
+    snapshot.cpc === null ? '' : snapshot.cpc,
+    snapshot.ga4Sessions === null ? '' : snapshot.ga4Sessions,
+    snapshot.ga4Revenue === null ? '' : snapshot.ga4Revenue,
+    snapshot.gscClicks === null ? '' : snapshot.gscClicks,
+    snapshot.gscImpressions === null ? '' : snapshot.gscImpressions,
+    snapshot.gscCtr === null ? '' : snapshot.gscCtr,
+    snapshot.gscPosition === null ? '' : snapshot.gscPosition,
+    snapshot.merchantApproved === null ? '' : snapshot.merchantApproved,
+    snapshot.merchantDisapproved === null ? '' : snapshot.merchantDisapproved,
     status,
     report,
     isoTimestamp_(new Date()),
@@ -234,25 +234,115 @@ function writeSourceRows_(periodEnd, data) {
 }
 
 function appendRecommendations_(recommendations) {
-  if (!recommendations || !recommendations.length) return;
   const sheet =
     getDashboardSpreadsheet_().getSheetByName('Recommendations');
+  const values = sheet.getDataRange().getValues();
+  const headers = values.shift() || [];
+  const categoryIndex = headers.indexOf('category');
+  const priorityIndex = headers.indexOf('priority');
+  const targetIndex = headers.indexOf('target');
+  const evidenceIndex = headers.indexOf('evidence');
+  const recommendationIndex = headers.indexOf('recommendation');
+  const approvalIndex = headers.indexOf('approvalStatus');
+  const activeRows = {};
+  if (categoryIndex >= 0 && targetIndex >= 0 && approvalIndex >= 0) {
+    const statuses = values.map(function (row) {
+      return [row[approvalIndex]];
+    });
+    const seen = {};
+    for (let index = values.length - 1; index >= 0; index -= 1) {
+      const row = values[index];
+      if (String(row[approvalIndex]) !== '承認待ち') continue;
+      const item = rowObject_(headers, row);
+      const retirement = recommendationRetirementReason_(item);
+      const key = String(row[categoryIndex]) + '|' + String(row[targetIndex]);
+      if (retirement) {
+        statuses[index][0] = '対象外（' + retirement + '）';
+      } else if (seen[key]) {
+        statuses[index][0] = '重複統合済み';
+      } else {
+        seen[key] = true;
+        activeRows[key] = index + 2;
+      }
+    }
+    if (values.length) {
+      sheet.getRange(2, approvalIndex + 1, values.length, 1).setValues(statuses);
+    }
+  }
+  if (!recommendations || !recommendations.length) return;
+  const batchKeys = {};
+  const newRecommendations = recommendations.filter(function (item) {
+    const key = item.category + '|' + item.target;
+    if (batchKeys[key]) return false;
+    batchKeys[key] = true;
+    if (activeRows[key]) {
+      if (
+        priorityIndex >= 0 && targetIndex >= 0 && evidenceIndex >= 0 &&
+        recommendationIndex >= 0
+      ) {
+        sheet.getRange(activeRows[key], priorityIndex + 1, 1, 4).setValues([[
+          item.priority,
+          item.target,
+          recommendationEvidenceForSheet_(item),
+          recommendationActionForSheet_(item),
+        ]]);
+      }
+      return false;
+    }
+    return true;
+  });
+  if (!newRecommendations.length) return;
   appendRows_(
     sheet,
-    recommendations.map(function (item) {
+    newRecommendations.map(function (item) {
       return [
         item.createdAt,
         item.cadence,
         item.category,
         item.priority,
         item.target,
-        item.evidence,
-        item.recommendation,
+        recommendationEvidenceForSheet_(item),
+        recommendationActionForSheet_(item),
         item.approvalStatus,
       ];
     }),
   );
   pruneSheet_(sheet, 5000);
+}
+
+function recommendationRetirementReason_(item) {
+  if (!item || String(item.approvalStatus) !== '承認待ち') return '';
+  if (String(item.category) !== 'SEO改善') return '';
+  const evidence = String(item.evidence || '');
+  const impressionMatch = evidence.match(/表示\s*([\d,]+)/);
+  const impressions = impressionMatch
+    ? Number(impressionMatch[1].replace(/,/g, ''))
+    : null;
+  if (impressions !== null && Number.isFinite(impressions) && impressions < 100) {
+    return '新基準: 表示100回未満';
+  }
+  const queryMatch = evidence.match(/["“]([^"”]+)["”]/);
+  const query = queryMatch ? queryMatch[1] : String(item.target || '');
+  const noiseReason = seoNoiseQueryReason_(query);
+  if (noiseReason) return '新基準: ' + noiseReason;
+  return '';
+}
+
+function recommendationEvidenceForSheet_(item) {
+  const parts = [];
+  if (item.cause) parts.push('原因: ' + item.cause);
+  if (item.evidence && item.evidence !== item.cause) {
+    parts.push('根拠: ' + item.evidence);
+  }
+  return parts.join(' / ') || String(item.evidence || '');
+}
+
+function recommendationActionForSheet_(item) {
+  return [
+    '変更内容: ' + String(item.change || item.recommendation || ''),
+    '期待効果: ' + String(item.expectedEffect || ''),
+    'リスク: ' + String(item.risk || ''),
+  ].join(' / ');
 }
 
 function appendProductAutomation_(rows) {
@@ -304,7 +394,7 @@ function logRun_(startedAt, handler, status, message) {
   pruneSheet_(sheet, 2000);
 }
 
-function sendGrowthReport_(cadence, periodEnd, report, snapshot) {
+function sendGrowthReport_(cadence, periodEnd, report, snapshot, findings) {
   const emails = String(keaConfig_().REPORT_EMAILS || '')
     .split(',')
     .map(function (email) {
@@ -312,7 +402,18 @@ function sendGrowthReport_(cadence, periodEnd, report, snapshot) {
     })
     .filter(Boolean);
   if (!emails.length) return { status: 'skipped', reason: 'REPORT_EMAILS未設定' };
-  const label = cadence === 'weekly' ? '週次改善提案' : '毎朝レポート';
+  const counts = findingCounts_(findings || []);
+  if (
+    cadence === 'daily' &&
+    counts['要対応'] === 0 && counts['要確認'] === 0
+  ) {
+    return { status: 'skipped', reason: '対応不要のみ' };
+  }
+  const label = cadence === 'weekly'
+    ? '週次改善提案'
+    : counts['要対応'] > 0
+      ? '[要対応] 日次通知'
+      : '[要確認] 日次ダイジェスト';
   const subject =
     '[Kea.] ' + label + ' ' + dateKey_(periodEnd);
   MailApp.sendEmail({
@@ -322,7 +423,7 @@ function sendGrowthReport_(cadence, periodEnd, report, snapshot) {
     htmlBody: reportToHtml_(report, snapshot),
     name: 'Kea. Growth Ops',
   });
-  return { status: 'sent', recipients: emails };
+  return { status: 'sent', recipients: emails, findingCounts: counts };
 }
 
 function reportToHtml_(report, snapshot) {
