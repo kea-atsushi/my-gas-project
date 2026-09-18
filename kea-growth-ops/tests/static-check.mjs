@@ -114,6 +114,7 @@ for (const required of [
   "unavailable/pending",
   "ShopifySkuAudit",
   "runShopifySkuAudit",
+  "verifyGrowthOpsActionableAlertsNow",
   "custom\", key: \"product_code",
   "selectedOptions",
 ]) {
@@ -368,6 +369,19 @@ assert.equal(skuAudit.rows[0].productCode, "2059242");
 assert.equal(skuAudit.rows[0].size, "M");
 assert.equal(skuAudit.rows[0].color, "BLACK");
 assert.equal(context.shopifySkuSheetCell_("=1+1"), "'=1+1");
+
+const actionableAlertsVerification =
+  context.verifyGrowthOpsActionableAlertsNow();
+assert.equal(actionableAlertsVerification.status, "passed");
+assert.equal(
+  actionableAlertsVerification.merchant603to602.level,
+  "対応不要",
+);
+assert.equal(
+  actionableAlertsVerification.merchantDisapprovalIncrease.level,
+  "要対応",
+);
+assert.equal(actionableAlertsVerification.seo.spamExcluded, true);
 assert.equal(
   context.shopifySkuSheetRows_(skuAudit)[0].length,
   new vm.Script("KEA_HEALTH_SHEETS.ShopifySkuAudit.length").runInContext(

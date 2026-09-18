@@ -200,6 +200,129 @@ function seoCtrCandidate_(row) {
   );
 }
 
+function seoNoiseQueryReason_(query) {
+  const value = String(query || '').trim();
+  if (!value) return '空クエリ';
+  if (value.length < 2) return '短すぎるクエリ';
+  if (/https?:\/\/|www\.|\b[\w-]+\.(?:com|net|org|jp|site|xyz|top|click)\b/i.test(value)) {
+    return 'URL・ドメイン形式';
+  }
+  if (/[\u{1F300}-\u{1FAFF}]/u.test(value)) return '絵文字を含む不自然なクエリ';
+  if (/^[a-z0-9_-]{16,}$/i.test(value) && /\d/.test(value) && /[a-z]/i.test(value)) {
+    return '長い英数字列';
+  }
+  if (/(.)\1{7,}/.test(value)) return '同一文字の異常な連続';
+  return '';
+}
+
+function seoCommercialIntent_(query, page) {
+  const value = String(query || '').toLowerCase();
+  const target = String(page || '').toLowerCase();
+  let score = 0;
+  const signals = [];
+  if (/\/products\//.test(target)) {
+    score += 3;
+    signals.push('商品ページ');
+  } else if (/\/collections\//.test(target)) {
+    score += 2;
+    signals.push('コレクションページ');
+  }
+  if (
+    /(通販|オンライン|購入|買う|価格|値段|在庫|サイズ|カラー|色|取扱|店舗|バッグ|ジャケット|コート|パンツ|シャツ|スカート|ワンピース|アクセサリー|靴|財布|sale|shop|store|price|buy|stock|size)/i.test(value)
+  ) {
+    score += 2;
+    signals.push('購入・商品意図語');
+  }
+  return { score: score, signals: signals };
+}
+
+function seoPriorityCandidateRow_(row) {
+  const source = row || {};
+  const keys = source.keys || [];
+  const query = String(source.query || keys[0] || '').trim();
+  const page = String(source.page || keys[1] || '').trim();
+  const impressions = Number(source.impressions || 0);
+  const ctr = Number(source.ctr || 0);
+  const position = Number(source.position || 0);
+  const clicks = Number(source.clicks || 0);
+  const noiseReason = seoNoiseQueryReason_(query);
+  if (
+    noiseReason || !page || impressions < 100 || ctr >= 0.02 ||
+    position <= 0 || position > 20
+  ) {
+    return null;
+  }
+  const intent = seoCommercialIntent_(query, page);
+  if (position <= 10) {
+    intent.score += 2;
+    intent.signals.push('検索上位10位以内');
+  } else {
+    intent.score += 1;
+    intent.signals.push('検索上位20位以内');
+  }
+  if (impressions >= 200) {
+    intent.score += 1;
+    intent.signals.push('表示200回以上');
+  }
+  if (clicks > 0) {
+    intent.score += 1;
+    intent.signals.push('クリック実績あり');
+  }
+  if (intent.score < 4) return null;
+  return {
+    query: query,
+    page: page,
+    clicks: clicks,
+    impressions: impressions,
+    ctr: ctr,
+    position: position,
+    intentScore: intent.score,
+    intentSignals: intent.signals,
+    score:
+      intent.score * 10000 +
+      Math.min(impressions, 5000) * 2 +
+      Math.max(0, 21 - position) * 100,
+  };
+}
+
+function seoPriorityCandidates_(rows) {
+  const byPage = {};
+  (rows || []).forEach(function (row) {
+    const candidate = seoPriorityCandidateRow_(row);
+    if (!candidate) return;
+    if (!byPage[candidate.page]) byPage[candidate.page] = [];
+    byPage[candidate.page].push(candidate);
+  });
+  return Object.keys(byPage).map(function (page) {
+    const candidates = byPage[page].sort(function (left, right) {
+      return right.score - left.score;
+    });
+    const top = candidates.slice(0, 3);
+    const lead = top[0];
+    const queryEvidence = top.map(function (item) {
+      return (
+        '"' + item.query + '" 表示 ' + item.impressions +
+        ' / CTR ' + percent_(item.ctr) +
+        ' / 順位 ' + decimal_(item.position) +
+        ' / 商業意図 ' + item.intentScore +
+        '（' + item.intentSignals.join('・') + '）'
+      );
+    });
+    return {
+      page: page,
+      priority:
+        lead.position <= 10 && lead.impressions >= 200 ? '高' : '中',
+      score: lead.score,
+      cause:
+        '十分な表示と商業意図がある一方、CTRが2%未満です。',
+      evidence: '対象ページ ' + page + ' / ' + queryEvidence.join(' / '),
+      queries: top,
+    };
+  }).sort(function (left, right) {
+    return right.score - left.score;
+  }).slice(0, 5);
+}
+
 function seoMajorUrlResult_(config, url) {
   const inspection = inspectSearchConsoleUrl_(config, url);
   const index =
@@ -232,34 +355,16 @@ function seoMajorUrlResult_(config, url) {
 
 function seoRecommendationsFromAudit_(audit) {
   const recommendations = [];
-  (audit.queryRows || []).filter(seoCtrCandidate_).slice(0, 20)
-    .forEach(function (row) {
-      const query = row.keys[0] || '';
+  seoPriorityCandidates_(audit.queryPageRows || []).forEach(function (candidate) {
       recommendations.push(
         healthRecommendation_(
           'SEO',
-          'ctr-query|' + query,
+          'ctr-page|' + candidate.page,
           'SEO改善',
-          Number(row.position || 0) <= 15 ? '高' : '中',
-          query,
-          '表示 ' + row.impressions + ' / CTR ' + percent_(row.ctr) +
-            ' / 順位 ' + decimal_(row.position),
-          '検索意図に合わせてTitle、Meta Description、内部リンクの変更候補を確認します。',
-        ),
-      );
-    });
-  (audit.pageRows || []).filter(seoCtrCandidate_).slice(0, 20)
-    .forEach(function (row) {
-      const page = row.keys[0] || '';
-      recommendations.push(
-        healthRecommendation_(
-          'SEO',
-          'ctr-page|' + page,
-          'SEO改善',          Number(row.position || 0) <= 15 ? '高' : '中',
-          page,
-          '表示 ' + row.impressions + ' / CTR ' + percent_(row.ctr) +
-            ' / 順位 ' + decimal_(row.position),
-          'ページのTitle、Meta Description、内部リンクを確認します。',
+          candidate.priority,
+          candidate.page,
+          candidate.evidence,
+          '実検索結果と対象ページを確認し、Title、Meta Description、内部リンクのうち根拠がある箇所だけ変更します。',
         ),
       );
     });
@@ -379,6 +484,11 @@ function runSeoHealthAuditCore_(config) {
       config, currentStart, currentEnd, ['page'], 25000,
     );
   }, []);
+  const queryPages = healthAttempt_('クエリ・ページ', function () {
+    return searchConsoleAnalytics_(
+      config, currentStart, currentEnd, ['query', 'page'], 25000,
+    );
+  }, []);
   const devices = healthAttempt_('デバイス', function () {
     return searchConsoleAnalytics_(
       config, currentStart, currentEnd, ['device'], 100,
@@ -438,6 +548,7 @@ function runSeoHealthAuditCore_(config) {
   const audit = {
     queryRows: queries.value,
     pageRows: pages.value,
+    queryPageRows: queryPages.value,
     clickChangePct: clickChangePct,
     sitemap: sitemapAttempt.value,
     majorUrls: majorResults,
@@ -460,6 +571,7 @@ function runSeoHealthAuditCore_(config) {
     previous.error,
     queries.error,
     pages.error,
+    queryPages.error,
     devices.error,
     sitemapAttempt.error,
     representative.error,
@@ -472,6 +584,12 @@ function runSeoHealthAuditCore_(config) {
   if (sitemapAttempt.value && sitemapAttempt.value.errors > 0) {
     notificationIssues.push({
       key: 'SEO|sitemap-errors',
+      level: '要対応',
+      source: 'SEO',
+      title: 'sitemapエラー',
+      cause: 'Search Consoleがsitemapエラーを返しています。',
+      evidence: 'エラー ' + sitemapAttempt.value.errors + '件',
+      action: 'Search Consoleで対象URLとエラー理由を確認します。',
       text: 'sitemapエラー ' + sitemapAttempt.value.errors + '件',
     });
   }
@@ -479,12 +597,25 @@ function runSeoHealthAuditCore_(config) {
     if (item.indexed === false) {
       notificationIssues.push({
         key: 'SEO|not-indexed|' + item.url,
+        level: '要対応',
+        source: 'SEO',
+        title: '主要URLがGoogle未登録',
+        cause: item.verdict + ' / ' + item.coverageState,
+        evidence: item.url + ' / 最終HTTP ' + item.finalHttpStatus,
+        action: 'Search ConsoleのURL検査で原因を確認し、必要時だけ登録を申請します。',
         text: '主要URLがGoogle未登録: ' + item.url,
       });
     }
     if (item.canonicalMatches === false) {
       notificationIssues.push({
         key: 'SEO|canonical|' + item.url,
+        level: '要対応',
+        source: 'SEO',
+        title: '主要URLのcanonical不一致',
+        cause: 'Google canonicalとShopify canonicalが一致しません。',
+        evidence: item.url + ' / Google ' + item.googleCanonical +
+          ' / Shopify ' + item.shopifyCanonical,
+        action: 'canonical、内部リンク、301の対応関係を確認します。',
         text: 'canonical不一致: ' + item.url,
       });
     }
@@ -492,6 +623,12 @@ function runSeoHealthAuditCore_(config) {
   if (clickChangePct !== null && clickChangePct <= -0.3) {
     notificationIssues.push({
       key: 'SEO|click-drop-30',
+      level: '要確認',
+      source: 'SEO',
+      title: 'SEOクリックが30%以上減少',
+      cause: '直近7日が前7日を30%以上下回りました。',
+      evidence: '前期間比 ' + percent_(clickChangePct),
+      action: '季節性と対象クエリ・ページを日次ダイジェストで確認します。',
       text: 'SEOクリックが前期間比' + percent_(clickChangePct) + 'です。',
     });
   }  const state = {

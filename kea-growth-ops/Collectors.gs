@@ -64,7 +64,16 @@ function collectShopifyOrders_(config, startDate, endDate) {
         throw error;
       }
     }
-    const connection = data.orders || { nodes: [], pageInfo: {} };
+    if (
+      !data || !data.orders || !Array.isArray(data.orders.nodes) ||
+      !data.orders.pageInfo ||
+      typeof data.orders.pageInfo.hasNextPage !== 'boolean'
+    ) {
+      throw new Error(
+        'Shopify orders API応答の構造が不正です。0件として扱いません。',
+      );
+    }
+    const connection = data.orders;
     orders.push.apply(orders, connection.nodes || []);
     after = connection.pageInfo && connection.pageInfo.hasNextPage
       ? connection.pageInfo.endCursor

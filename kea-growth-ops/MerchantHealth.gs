@@ -44,6 +44,211 @@ function merchantPriceIssue_(issue) {
   );
 }
 
+function merchantIssueCategory_(issue) {
+  const code = String(issue && issue.code || '').toLowerCase();
+  const attribute = String(
+    issue && issue.canonicalAttribute || '',
+  ).toLowerCase();
+  const value = code + ' ' + attribute;
+  if (/gtin|barcode|ean|isbn|upc|identifier/.test(value)) {
+    return { key: 'gtin', label: 'GTIN・商品識別子' };
+  }
+  if (/image|画像|picture|thumbnail/.test(value)) {
+    return { key: 'image', label: '画像' };
+  }
+  if (/availability|inventory|quantity|stock|在庫/.test(value)) {
+    return { key: 'inventory', label: '在庫・販売可否' };
+  }
+  if (/price|currency|価格/.test(value)) {
+    return { key: 'price', label: '価格' };
+  }
+  if (/brand|ブランド/.test(value)) {
+    return { key: 'brand', label: 'ブランド' };
+  }
+  if (/mpn|manufacturer.*part/.test(value)) {
+    return { key: 'mpn', label: 'MPN' };
+  }
+  if (/shipping|delivery|送料|配送/.test(value)) {
+    return { key: 'shipping', label: '配送・送料' };
+  }
+  if (/policy|misrepresentation|restricted|prohibited/.test(value)) {
+    return { key: 'policy', label: 'ポリシー' };
+  }
+  return { key: 'other', label: 'その他' };
+}
+
+function merchantIssueGroups_(products) {
+  const groups = {};
+  (products || []).forEach(function (product) {
+    (product.itemIssues || [])
+      .filter(merchantIssueNeedsAction_)
+      .forEach(function (issue) {
+        const category = merchantIssueCategory_(issue);
+        if (!groups[category.key]) {
+          groups[category.key] = {
+            key: category.key,
+            label: category.label,
+            products: {},
+            issueCodes: {},
+            severities: {},
+          };
+        }
+        const group = groups[category.key];
+        const productKey = String(product.id || product.offerId || product.title);
+        group.products[productKey] = {
+          id: product.id || '',
+          offerId: product.offerId || '',
+          title: product.title || '',
+          status: product.status || '',
+        };
+        group.issueCodes[issue.code] = Number(group.issueCodes[issue.code] || 0) + 1;
+        group.severities[issue.severity || 'UNKNOWN'] = true;
+      });
+  });
+  return Object.keys(groups).map(function (key) {
+    const group = groups[key];
+    group.productList = Object.keys(group.products).map(function (productKey) {
+      return group.products[productKey];
+    });
+    group.codes = Object.keys(group.issueCodes).sort();
+    group.productCount = group.productList.length;
+    return group;
+  }).sort(function (left, right) {
+    return right.productCount - left.productCount ||
+      left.label.localeCompare(right.label);
+  });
+}
+
+function merchantGroupEvidence_(group) {
+  const products = (group.productList || []).slice(0, 8).map(function (product) {
+    return (product.title || product.offerId || product.id) +
+      (product.offerId ? ' [' + product.offerId + ']' : '');
+  });
+  return [
+    '原因分類 ' + group.label,
+    '対象 ' + group.productCount + '商品' +
+      (products.length ? '（' + products.join('、') +
+        (group.productCount > products.length ? 'ほか' : '') + '）' : ''),
+    '実issue ' + group.codes.map(function (code) {
+      return code + ' (' + group.issueCodes[code] + ')';
+    }).join(', '),
+  ].join(' / ');
+}
+
+function merchantCategoryAction_(categoryKey) {
+  const actions = {
+    price: '対象商品のShopify表示価格・比較価格とMerchant取得値を照合し、不一致箇所だけ修正します。',
+    inventory: '対象商品のShopify在庫・公開状態・販売可否とMerchant取得値を照合し、不一致箇所だけ修正します。',
+    image: '対象商品の主画像URL・クロール可否・画像要件を確認し、問題画像だけ修正します。',
+    gtin: '一次資料または商品現物でGTINを確認し、確認できた対象だけ識別子を修正します。',
+    brand: '一次資料とShopifyブランド値を照合し、根拠がある対象だけ修正します。',
+    mpn: '一次資料でメーカー品番を確認し、確認できた対象だけ修正します。',
+    shipping: 'Merchantの配送設定とShopify側条件を照合し、影響範囲を確認してから修正します。',
+    policy: 'Merchant Centerの詳細と対象ページを確認し、ポリシー違反の原因だけ対応します。',
+    other: 'Merchant Centerの実issueと対象商品を確認し、原因が確定した対象だけ修正します。',
+  };
+  return actions[categoryKey] || actions.other;
+}
+
+function merchantChangeAssessment_(current, previous) {
+  if (!previous) {
+    return {
+      level: '対応不要',
+      key: 'baseline',
+      title: 'Merchant初回基準値を記録',
+      reason: '比較元がないため通知せず、次回差分の基準にします。',
+      evidence: '商品 ' + current.totalProducts + ' / 承認 ' + current.approved +
+        ' / 不承認 ' + current.disapproved,
+      action: '対応不要',
+    };
+  }
+  const delta = function (key) {
+    return Number(current[key] || 0) - Number(previous[key] || 0);
+  };
+  const totalDelta = delta('totalProducts');
+  const approvedDelta = delta('approved');
+  const pendingDelta = delta('pending');
+  const disapprovedDelta = delta('disapproved');
+  const limitedDelta = delta('limited');
+  const evidence =
+    '商品 ' + previous.totalProducts + '→' + current.totalProducts +
+    ' / 承認 ' + previous.approved + '→' + current.approved +
+    ' / 審査中 ' + previous.pending + '→' + current.pending +
+    ' / 不承認 ' + previous.disapproved + '→' + current.disapproved +
+    ' / 制限 ' + previous.limited + '→' + current.limited;
+  if (disapprovedDelta > 0) {
+    return {
+      level: '要対応',
+      key: 'disapproved-increase',
+      title: 'Merchant不承認が増加',
+      reason: '不承認商品が' + disapprovedDelta + '件増えました。',
+      evidence: evidence,
+      action: '新たに不承認になった商品と実issueを原因別に確認します。',
+    };
+  }
+  const normalRemovalLimit = Math.max(
+    5,
+    Math.ceil(Number(previous.totalProducts || 0) * 0.02),
+  );
+  if (
+    totalDelta < 0 && approvedDelta === totalDelta &&
+    pendingDelta === 0 && disapprovedDelta === 0 && limitedDelta === 0 &&
+    Math.abs(totalDelta) <= normalRemovalLimit
+  ) {
+    return {
+      level: '対応不要',
+      key: 'normal-feed-removal',
+      title: 'Merchantの正常な対象外変化',
+      reason: '商品総数と承認数だけが同数減少し、不承認・審査中・制限は増えていません。削除・非公開等でフィード対象外になったパターンです。',
+      evidence: evidence,
+      action: '通知せず記録のみ。商品変更は行いません。',
+    };
+  }
+  if (
+    totalDelta > 0 && approvedDelta === totalDelta &&
+    pendingDelta === 0 && disapprovedDelta === 0 && limitedDelta === 0
+  ) {
+    return {
+      level: '対応不要',
+      key: 'normal-approved-addition',
+      title: 'Merchant承認商品の正常増加',
+      reason: '追加商品がそのまま承認され、不承認等は増えていません。',
+      evidence: evidence,
+      action: '通知せず記録のみ。',
+    };
+  }
+  if (disapprovedDelta < 0 && pendingDelta <= 0 && limitedDelta <= 0) {
+    return {
+      level: '対応不要',
+      key: 'disapproved-decrease',
+      title: 'Merchant不承認が減少',
+      reason: '不承認が' + Math.abs(disapprovedDelta) + '件減りました。',
+      evidence: evidence,
+      action: '改善として記録し、通知しません。',
+    };
+  }
+  if (!totalDelta && !approvedDelta && !pendingDelta && !disapprovedDelta && !limitedDelta) {
+    return {
+      level: '対応不要',
+      key: 'no-change',
+      title: 'Merchant状態変化なし',
+      reason: '主要件数に変化はありません。',
+      evidence: evidence,
+      action: '対応不要',
+    };
+  }
+  return {
+    level: '要確認',
+    key: 'unexplained-change',
+    title: 'Merchant状態の要確認変化',
+    reason: pendingDelta > 0
+      ? '審査中商品が' + pendingDelta + '件増えました。'
+      : '正常な追加・削除パターンだけでは説明できない変化です。',
+    evidence: evidence,
+    action: '日次ダイジェストで対象商品と実issueを確認します。',
+  };
+}
+
 function merchantIssueCounts_(products, accountIssues) {
   const counts = {};
   (products || []).forEach(function (product) {
@@ -159,29 +364,24 @@ function collectMerchantGbpLinks_(accountId) {
 
 function merchantHealthRecommendations_(diagnostics, summary, syncStatus) {
   const recommendations = [];
-  (diagnostics.products || []).forEach(function (product) {
-    (product.itemIssues || [])
-      .filter(merchantIssueNeedsAction_)
-      .forEach(function (issue) {
-        const priceIssue = merchantPriceIssue_(issue);
-        recommendations.push(
-          healthRecommendation_(
-            'MERCHANT',
-            'product|' + product.id + '|' + issue.code + '|' + product.status,
-            'Merchant商品',
-            priceIssue ? '高' : '中',
-            product.title || product.offerId,
-            [
-              'issue ' + issue.code,
-              '状態 ' + product.status,
-              '影響 ' + issue.severity,
-              '国 ' + issue.countries,
-              '解決 ' + issue.resolution,
-            ].filter(Boolean).join(' / '),
-            'Shopifyの商品・価格・在庫を確認します。Merchant APIから商品を書き換えません。',
-          ),
-        );
-      });
+  merchantIssueGroups_(diagnostics.products).forEach(function (group) {
+    const item = healthRecommendation_(
+      'MERCHANT',
+      'cause-group|' + group.key,
+      'Merchant商品',
+      group.severities.DISAPPROVED ? '高' : '中',
+      group.label + '（MerchantIssuesの該当商品）',
+      merchantGroupEvidence_(group),
+      merchantCategoryAction_(group.key),
+      {
+        cause: group.label + ': ' + group.codes.join(', '),
+        expectedEffect: '対象商品の不承認・掲載制限の解消を確認できます。',
+        risk: '一次情報を確認せず一括変更すると価格・在庫・識別子等を誤るため、対象別に確認します。',
+        dedupeKey: 'MERCHANT|cause-group|' + group.key,
+        notificationLevel: group.severities.DISAPPROVED ? '要対応' : '要確認',
+      },
+    );
+    recommendations.push(item);
   });
   (diagnostics.accountIssues || []).forEach(function (issue) {
     const details = merchantAccountIssueDetails_(issue);
@@ -295,7 +495,16 @@ function runMerchantHealthWatchCore_(config) {
       localInventoryIssues.length
         ? 'issue'
         : gbpLinks.status,
+    disapprovedIssueKeys: diagnostics.products.reduce(function (keys, product) {
+      product.itemIssues.forEach(function (issue) {
+        if (issue.resolution === 'MERCHANT_ACTION' && issue.severity === 'DISAPPROVED') {
+          keys.push(product.id + '|' + issue.code);
+        }
+      });
+      return keys;
+    }, []).sort(),
   });
+  const changeAssessment = merchantChangeAssessment_(state, previous);
   const recommendations = merchantHealthRecommendations_(
     diagnostics,
     summary,
@@ -308,6 +517,13 @@ function runMerchantHealthWatchCore_(config) {
     const details = merchantAccountIssueDetails_(issue);
     notificationIssues.push({
       key: 'MERCHANT|critical-account|' + details.code,
+      level: '要対応',
+      source: 'Merchant Center',
+      title: 'Merchantアカウント重大issue',
+      cause: details.title || details.code,
+      evidence: [details.detail, details.reportingContexts, details.documentationUrl]
+        .filter(Boolean).join(' / '),
+      action: 'Merchant Centerの診断詳細を確認し、承認後に対象設定だけ対応します。',
       text: 'Merchant重大issue: ' + (details.title || details.code),
     });
   });
@@ -322,6 +538,16 @@ function runMerchantHealthWatchCore_(config) {
         key:
           'MERCHANT|critical-product|' + product.id + '|' + issue.code +
           '|' + product.status,
+        level: '要対応',
+        source: 'Merchant Center',
+        title: 'Merchant商品不承認: ' + (product.title || product.offerId),
+        cause: merchantIssueCategory_(issue).label + ' / ' + issue.code,
+        evidence:
+          '対象 ' + (product.title || product.offerId) +
+          ' [' + (product.offerId || product.id) + '] / 状態 ' + product.status +
+          ' / 影響 ' + issue.severity + ' / 国 ' + issue.countries,
+        action: merchantCategoryAction_(merchantIssueCategory_(issue).key),
+        groupKey: 'MERCHANT|' + merchantIssueCategory_(issue).key,
         text:
           'Merchant商品issue: ' + (product.title || product.offerId) +
           ' / ' + issue.code,
@@ -358,6 +584,7 @@ function runMerchantHealthWatchCore_(config) {
     state: state,
     recommendations: recommendations,
     notificationIssues: notificationIssues,
+    changeAssessment: changeAssessment,
     localInventoryLink: gbpLinks,
     checkedAt: isoTimestamp_(checkedAt),
   };

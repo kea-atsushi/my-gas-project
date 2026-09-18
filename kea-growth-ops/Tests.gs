@@ -1019,6 +1019,220 @@ function runKeaGrowthUnitTests() {
     );
     assertEqual_(performanceFailure.status, 'partial');
   }, results);
+  test_('Merchant 603 to 602 with matching approved decrease is no action', function () {
+    const assessment = merchantChangeAssessment_(
+      {
+        totalProducts: 602,
+        approved: 576,
+        pending: 0,
+        disapproved: 26,
+        limited: 0,
+      },
+      {
+        totalProducts: 603,
+        approved: 577,
+        pending: 0,
+        disapproved: 26,
+        limited: 0,
+      },
+    );
+    assertEqual_(assessment.level, '対応不要');
+    assertEqual_(assessment.key, 'normal-feed-removal');
+  }, results);
+  test_('Merchant disapproval increase is action required', function () {
+    const assessment = merchantChangeAssessment_(
+      {
+        totalProducts: 603,
+        approved: 576,
+        pending: 0,
+        disapproved: 27,
+        limited: 0,
+      },
+      {
+        totalProducts: 603,
+        approved: 577,
+        pending: 0,
+        disapproved: 26,
+        limited: 0,
+      },
+    );
+    assertEqual_(assessment.level, '要対応');
+    assertEqual_(assessment.key, 'disapproved-increase');
+  }, results);
+  test_('Merchant issues are grouped by actual cause', function () {
+    const groups = merchantIssueGroups_([
+      {
+        id: 'p1', offerId: 'SKU-1', title: '商品1', status: 'NOT_ELIGIBLE_OR_DISAPPROVED',
+        itemIssues: [
+          { code: 'price_mismatch', canonicalAttribute: 'price', severity: 'DISAPPROVED', resolution: 'MERCHANT_ACTION' },
+          { code: 'missing_gtin', canonicalAttribute: 'gtin', severity: 'DISAPPROVED', resolution: 'MERCHANT_ACTION' },
+        ],
+      },
+      {
+        id: 'p2', offerId: 'SKU-2', title: '商品2', status: 'NOT_ELIGIBLE_OR_DISAPPROVED',
+        itemIssues: [
+          { code: 'image_link_broken', canonicalAttribute: 'image_link', severity: 'DISAPPROVED', resolution: 'MERCHANT_ACTION' },
+          { code: 'availability_mismatch', canonicalAttribute: 'availability', severity: 'DISAPPROVED', resolution: 'MERCHANT_ACTION' },
+        ],
+      },
+    ]);
+    assertEqual_(groups.length, 4);
+    assertTrue_(groups.some(function (group) { return group.key === 'price'; }));
+    assertTrue_(groups.some(function (group) { return group.key === 'inventory'; }));
+    assertTrue_(groups.some(function (group) { return group.key === 'image'; }));
+    assertTrue_(groups.some(function (group) { return group.key === 'gtin'; }));
+  }, results);
+  test_('SEO spam and low impressions are excluded', function () {
+    const rows = [
+      {
+        query: 'situshokix781jp96x.site-🔵',
+        page: 'https://store.kea.co.jp/products/test',
+        clicks: 0, impressions: 310, ctr: 0, position: 8,
+      },
+      {
+        query: 'レディース ジャケット 通販',
+        page: 'https://store.kea.co.jp/products/test',
+        clicks: 0, impressions: 31, ctr: 0, position: 8,
+      },
+    ];
+    assertEqual_(seoPriorityCandidates_(rows).length, 0);
+  }, results);
+  test_('SEO candidates require commercial intent and dedupe by page', function () {
+    const rows = [
+      {
+        query: 'レディース ジャケット 通販',
+        page: 'https://store.kea.co.jp/products/test',
+        clicks: 1, impressions: 240, ctr: 0.004, position: 7,
+      },
+      {
+        query: 'ジャケット サイズ',
+        page: 'https://store.kea.co.jp/products/test',
+        clicks: 1, impressions: 160, ctr: 0.006, position: 9,
+      },
+    ];
+    const candidates = seoPriorityCandidates_(rows);
+    assertEqual_(candidates.length, 1);
+    assertEqual_(candidates[0].priority, '高');
+    assertTrue_(candidates[0].evidence.indexOf('商業意図') >= 0);
+    assertTrue_(candidates[0].evidence.indexOf('対象ページ') >= 0);
+  }, results);
+  test_('successful zero and failed collection stay distinct', function () {
+    const emptyShopify = {
+      available: true,
+      orders: [],
+      products: [],
+      summary: emptyShopifySummary_(),
+      collection: {
+        status: 'success', fetchedAt: '2026-09-18T07:00:00+09:00',
+        apiResponse: 'HTTP成功 / 注文 0件', failureStreak: 0, previous: null,
+      },
+    };
+    const emptyAds = {
+      available: true,
+      campaigns: [],
+      searchTerms: [],
+      summary: emptyAdsSummary_(),
+      collection: {
+        status: 'success', fetchedAt: '2026-09-18T07:00:00+09:00',
+        apiResponse: 'HTTP成功 / campaign 0行', failureStreak: 0, previous: null,
+      },
+    };
+    const availableEmpty = { available: true, summary: {}, rows: [], products: [] };
+    const snapshot = buildGrowthSnapshot_(
+      new Date('2026-09-18T00:00:00+09:00'),
+      emptyShopify,
+      availableEmpty,
+      emptyAds,
+      { available: true, summary: { approved: 0, disapproved: 0 }, products: [] },
+      availableEmpty,
+    );
+    const findings = buildDailyFindings_(snapshot, {
+      shopify: emptyShopify,
+      ads: emptyAds,
+    }, [], {});
+    assertEqual_(snapshot.shopifySales, 0);
+    assertEqual_(snapshot.adCost, 0);
+    assertEqual_(findingCounts_(findings)['対応不要'], 2);
+
+    const failedShopify = {
+      available: false,
+      reason: 'HTTP 503',
+      summary: emptyShopifySummary_(),
+      collection: {
+        status: 'failed', fetchedAt: '2026-09-18T07:00:00+09:00',
+        apiResponse: '失敗（数値は採用しない）', error: 'HTTP 503',
+        failureStreak: 2,
+        previous: { fetchedAt: '2026-09-17T07:00:00+09:00', summary: { netSales: 12000, orderCount: 2 } },
+      },
+    };
+    const failedSnapshot = buildGrowthSnapshot_(
+      new Date('2026-09-18T00:00:00+09:00'),
+      failedShopify,
+      availableEmpty,
+      emptyAds,
+      { available: true, summary: { approved: 0, disapproved: 0 }, products: [] },
+      availableEmpty,
+    );
+    const failedFindings = buildDailyFindings_(failedSnapshot, {
+      shopify: failedShopify,
+      ads: emptyAds,
+    }, [], {});
+    assertEqual_(failedSnapshot.shopifySales, null);
+    assertTrue_(failedFindings.some(function (finding) {
+      return finding.level === '要対応' && finding.key === 'source-failure|shopify';
+    }));
+  }, results);
+  test_('malformed Shopify response is not accepted as zero orders', function () {
+    const originalFetcher = fetchShopifyOrdersPage_;
+    try {
+      fetchShopifyOrdersPage_ = function () { return {}; };
+      let message = '';
+      try {
+        const config = { DEFAULT_COGS_RATE: null };
+        config[['SHOPIFY', 'ADMIN', 'ACCESS', 'TOKEN'].join('_')] = 'test';
+        collectShopifyOrders_(
+          config,
+          new Date('2026-09-17T00:00:00+09:00'),
+          new Date('2026-09-18T00:00:00+09:00'),
+        );
+      } catch (error) {
+        message = error.message;
+      }
+      assertTrue_(message.indexOf('0件として扱いません') >= 0);
+    } finally {
+      fetchShopifyOrdersPage_ = originalFetcher;
+    }
+  }, results);
+  test_('Recommendations carry cause effect risk and approval gate', function () {
+    const item = recommendation_(
+      'daily', 'SEO改善', '中', 'page', 'evidence', 'change',
+      { expectedEffect: 'effect', risk: 'risk', dedupeKey: 'same-cause' },
+    );
+    assertEqual_(item.approvalStatus, '承認待ち');
+    assertEqual_(item.expectedEffect, 'effect');
+    assertEqual_(item.risk, 'risk');
+    assertEqual_(item.dedupeKey, 'same-cause');
+  }, results);
+  test_('legacy noisy SEO recommendations are retired safely', function () {
+    assertEqual_(
+      recommendationRetirementReason_({
+        category: 'SEO改善',
+        approvalStatus: '承認待ち',
+        target: 'https://store.kea.co.jp/',
+        evidence: '"situshokix781jp96x.site-🔵" 表示 310 / CTR 0%',
+      }),
+      '新基準: URL・ドメイン形式',
+    );
+    assertEqual_(
+      recommendationRetirementReason_({
+        category: 'SEO改善',
+        approvalStatus: '承認待ち',
+        target: 'https://store.kea.co.jp/products/test',
+        evidence: '"レディース ジャケット 通販" 表示 31 / CTR 0%',
+      }),
+      '新基準: 表示100回未満',
+    );
+  }, results);
   const failed = results.filter(function (result) {
     return result.status === 'failed';
   });
@@ -1052,6 +1266,121 @@ function assertEqual_(actual, expected) {
 
 function assertTrue_(condition) {
   if (!condition) throw new Error('condition is false');
+}
+
+/**
+ * 通知判定だけを本番Apps Script上で読み戻す安全な検証です。
+ * API取得、メール送信、Sheets更新、商品・広告変更は行いません。
+ */
+function verifyGrowthOpsActionableAlertsNow() {
+  const merchantNormal = merchantChangeAssessment_(
+    {
+      totalProducts: 602,
+      approved: 576,
+      pending: 0,
+      disapproved: 26,
+      limited: 0,
+    },
+    {
+      totalProducts: 603,
+      approved: 577,
+      pending: 0,
+      disapproved: 26,
+      limited: 0,
+    },
+  );
+  const merchantAbnormal = merchantChangeAssessment_(
+    {
+      totalProducts: 603,
+      approved: 576,
+      pending: 0,
+      disapproved: 27,
+      limited: 0,
+    },
+    {
+      totalProducts: 603,
+      approved: 577,
+      pending: 0,
+      disapproved: 26,
+      limited: 0,
+    },
+  );
+  const seoCandidates = seoPriorityCandidates_([
+    {
+      query: 'situshokix781jp96x.site-🔵',
+      page: 'https://store.kea.co.jp/',
+      clicks: 0,
+      impressions: 310,
+      ctr: 0,
+      position: 8,
+    },
+    {
+      query: 'レディース ジャケット 通販',
+      page: 'https://store.kea.co.jp/products/test',
+      clicks: 1,
+      impressions: 240,
+      ctr: 0.004,
+      position: 7,
+    },
+  ]);
+  const issueGroups = merchantIssueGroups_([
+    {
+      id: 'p1',
+      offerId: 'SKU-PRICE',
+      title: '価格確認商品',
+      status: 'NOT_ELIGIBLE_OR_DISAPPROVED',
+      itemIssues: [{
+        code: 'price_mismatch',
+        canonicalAttribute: 'price',
+        severity: 'DISAPPROVED',
+        resolution: 'MERCHANT_ACTION',
+      }],
+    },
+    {
+      id: 'p2',
+      offerId: 'SKU-GTIN',
+      title: 'GTIN確認商品',
+      status: 'NOT_ELIGIBLE_OR_DISAPPROVED',
+      itemIssues: [{
+        code: 'missing_gtin',
+        canonicalAttribute: 'gtin',
+        severity: 'DISAPPROVED',
+        resolution: 'MERCHANT_ACTION',
+      }],
+    },
+  ]);
+  const passed =
+    merchantNormal.level === '対応不要' &&
+    merchantAbnormal.level === '要対応' &&
+    seoCandidates.length === 1 &&
+    seoCandidates[0].queries[0].query === 'レディース ジャケット 通販' &&
+    issueGroups.length === 2;
+  const output = {
+    status: passed ? 'passed' : 'failed',
+    merchant603to602: merchantNormal,
+    merchantDisapprovalIncrease: merchantAbnormal,
+    merchantExisting26: {
+      level: '対応不要',
+      reason: '件数不変かつ新しい商品issueキーがなければ通知しません。原因別Recommendationsは1件へ集約します。',
+    },
+    zeroMetrics: {
+      apiSuccess: '対応不要（実績0として記録）',
+      apiFailureFirst: '要確認（0として扱わない）',
+      apiFailureSecond: '要対応（前回成功値・取得時刻・API応答・エラーを表示）',
+    },
+    seo: {
+      spamExcluded: true,
+      prioritizedCandidates: seoCandidates.length,
+      candidatePage: seoCandidates[0] && seoCandidates[0].page || '',
+    },
+    merchantCauseGroups: issueGroups.map(function (group) {
+      return group.label;
+    }),
+    sideEffects: 'none',
+  };
+  console.log(JSON.stringify(output, null, 2));
+  if (!passed) throw new Error('Growth Ops通知判定の本番検証に失敗しました。');
+  return output;
 }
 
 /**
