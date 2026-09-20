@@ -1152,8 +1152,32 @@ for (const vendor of coveredBrands) {
   const queries = brandContext.brandRankTargetRows_([entry], []);
   assert.ok(queries.some((row) => row.axis === "ブランド会社名・運営会社名" && row.query));
   assert.ok(queries.filter((row) => row.category).every((row) => row.category === "実在カテゴリー"));
+  if (vendor !== 'SUICOKE') assert.ok(queries.some(row => row.category === '実在カテゴリー'));
 }
 assert.equal(brandContext.brandRankCategories_({ vendor: "SINME" }).length, 0);
+
+// SUICOKE's current verified product is a bag; unrelated title text is not evidence.
+const suicokeEntry = { vendor: 'SUICOKE', collectionUrl: 'https://example.test/suicoke',
+  collection: { seo: { title: 'SUICOKE（スイコック）｜サンダル・シューズ' } } };
+const suicokeProduct = { vendor: 'SUICOKE', handle: 'product-7272', title: 'OUTLANDER',
+  productCode: { value: 'OG-BG-005' }, status: 'ACTIVE', publishedAt: '2026-09-20',
+  onlineStoreUrl: 'https://store.kea.co.jp/products/product-7272' };
+const suicokeInputsBefore = JSON.stringify([suicokeEntry, suicokeProduct]);
+const suicokeQueries = brandContext.brandRankTargetRows_([suicokeEntry], [suicokeProduct]);
+const suicokeCategoryQueries = suicokeQueries.filter(row => row.axis === 'ブランド名＋カテゴリー');
+assert.ok(suicokeCategoryQueries.length > 0);
+assert.ok(suicokeCategoryQueries.every(row => row.category === 'バッグ' && row.query.endsWith(' バッグ')));
+assert.equal(JSON.stringify([suicokeEntry, suicokeProduct]), suicokeInputsBefore,
+  'monitor query generation must not change title, product code or other source data');
+for (const products of [[], [{ ...suicokeProduct, handle: 'unknown-handle' }],
+  [{ ...suicokeProduct, status: 'DRAFT' }], [{ ...suicokeProduct, publishedAt: null }],
+  [{ ...suicokeProduct, onlineStoreUrl: null }]]) {
+  const queries = brandContext.brandRankTargetRows_([suicokeEntry], products);
+  assert.equal(queries.filter(row => row.axis === 'ブランド名＋カテゴリー').length, 0,
+    'unverified or unpublished products must not fall back to bags, sandals or shoes');
+  assert.ok(queries.some(row => row.axis === 'ブランド名単体'));
+  assert.ok(queries.some(row => row.axis === 'ブランド名＋通販'));
+}
 brandLease = `${Date.now() + 60000}|existing-owner`;
 assert.equal(brandContext.brandRankAcquireLease_(), "");
 assert.ok(brandLease.endsWith("|existing-owner"));
