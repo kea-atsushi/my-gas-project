@@ -18,7 +18,7 @@ const KEA_BRAND_RANK_SUMMARY_HEADERS_ = [
   'brandQueryPosition', 'googleSelectedLandingPage',
   'collectionLandingPage', 'collectionClicks', 'collectionImpressions',
   'collectionCtr', 'collectionPosition', 'top10Collection',
-  'gscRowsComplete', 'notes',
+  'gscRowsComplete', 'notes', 'inStockProductCount',
 ];
 
 const KEA_BRAND_RANK_QUERY_HEADERS_ = [
@@ -426,13 +426,105 @@ function brandRankEnsureSheet_(name, headers) {
   if (!sheet) sheet = spreadsheet.insertSheet(name);
   const existing = sheet.getRange(1, 1, 1, Math.max(1, headers.length)).getValues()[0];
   if (existing.join('|') !== headers.join('|')) {
-    sheet.clearContents();
+    // Add the inventory column without erasing the existing 24-column history.
+    const summaryExtension = name === KEA_BRAND_RANK_SUMMARY_SHEET_ &&
+      existing.slice(0, 24).join('|') === headers.slice(0, 24).join('|') &&
+      !existing[24];
+    if (!summaryExtension) sheet.clearContents();
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.getRange(1, 1, 1, headers.length)
       .setBackground('#111111').setFontColor('#ffffff').setFontWeight('bold');
     sheet.setFrozenRows(1);
   }
   return sheet;
+}
+
+/** Pure aggregation of the existing weekly collection-ranking observations. */
+function brandRankKpiFromRows_(rows) {
+  const candidates = (rows || []).filter(function (row) {
+    return row.window === 'last_28d' && row.checkedAt;
+  });
+  const latest = candidates.reduce(function (time, row) {
+    return Math.max(time, new Date(row.checkedAt).getTime() || 0);
+  }, 0);
+  const current = candidates.filter(function (row) {
+    return new Date(row.checkedAt).getTime() === latest;
+  });
+  const byBrand = {};
+  current.forEach(function (row) { byBrand[row.brand] = row; });
+  // The latest catalog-backed run defines active brands, not the alias reference.
+  const brands = Object.keys(byBrand);
+  const items = brands.map(function (brand) {
+    const row = byBrand[brand] || {};
+    const impressions = Number(row.collectionImpressions || 0);
+    const position = Number(row.collectionPosition || 0);
+    const observed = impressions > 0 && isFinite(position) && position > 0;
+    return {
+      brand: brand, query: row.brandQuery || '', collectionUrl: row.collectionUrl || '',
+      clicks: Number(row.collectionClicks || 0), impressions: impressions,
+      ctr: Number(row.collectionCtr || 0), position: observed ? position : null,
+      status: !observed ? 'unknown' : position <= 10 ? 'TOP10' : position <= 20 ? '11–20' : '21以下',
+      lowSample: observed && impressions <= 2,
+      inStockProductCount: row.inStockProductCount === '' || row.inStockProductCount == null
+        ? null : Number(row.inStockProductCount),
+    };
+  });
+  const count = function (status) {
+    return items.filter(function (item) { return item.status === status; }).length;
+  };
+  const first = current[0] || {};
+  const dateText = function (value) {
+    return value instanceof Date ? dateKey_(value) : String(value || '');
+  };
+  return {
+    available: !!current.length,
+    checkedAt: first.checkedAt instanceof Date ? first.checkedAt.toISOString() : first.checkedAt || '',
+    windowStart: dateText(first.windowStart), windowEnd: dateText(first.windowEnd),
+    brandCount: items.length, top10Count: count('TOP10'),
+    top10Rate: items.length ? count('TOP10') / items.length : null,
+    nearTop10Count: count('11–20'), lowerRankCount: count('21以下'), unknownCount: count('unknown'),
+    lowSampleTop10: items.filter(function (item) { return item.status === 'TOP10' && item.lowSample; }),
+    gscRowsComplete: current.length > 0 && current.every(function (row) {
+      return row.gscRowsComplete === true || row.gscRowsComplete === 'TRUE';
+    }),
+    definition: '英字・日本語等の単体表記のうち、対象ブランドコレクションの平均順位が最良の表記（同順位は表示数順）を採用。商品・旧URLの順位は成功に含めない。',
+    caveat: 'GSC無観測はunknownで、TOP10外や表示ゼロとは断定しない。1〜2表示は暫定。平均順位は実際の全検索での固定順位ではない。各表記はBrandSEOQueriesを参照。',
+    brands: items,
+  };
+}
+
+/** Read saved observations only; daily/dashboard never trigger another collector. */
+function readBrandRankKpi_() {
+  try {
+    const sheet = getDashboardSpreadsheet_().getSheetByName(KEA_BRAND_RANK_SUMMARY_SHEET_);
+    if (!sheet) return brandRankKpiFromRows_([]);
+    const values = sheet.getDataRange().getValues();
+    const headers = values.shift() || [];
+    return brandRankKpiFromRows_(values.map(function (row) { return rowObject_(headers, row); }));
+  } catch (error) {
+    return { available: false, reason: '保存済みブランド順位を取得できません: ' + error.message };
+  }
+}
+
+function buildBrandRankKpiSummary_() {
+  const kpi = readBrandRankKpi_();
+  if (!kpi.available) return 'SEO主要KPI｜ブランド名単体TOP10率: 未取得' +
+    (kpi.reason ? '（' + kpi.reason + '）' : '（既存週次監視の取得待ち）') + '\n\n';
+  const lowSample = kpi.lowSampleTop10.map(function (item) {
+    return item.brand + '「' + item.query + '」' + item.impressions + '表示';
+  }).join(' / ');
+  return [
+    'SEO主要KPI｜ブランド名単体でブランドページTOP10',
+    '- ' + kpi.top10Count + '/' + kpi.brandCount + 'ブランド（' +
+      (kpi.top10Rate * 100).toFixed(1) + '%、全対象が分母） / 11〜20位: ' +
+      kpi.nearTop10Count + ' / 21位以下: ' + kpi.lowerRankCount + ' / unknown: ' + kpi.unknownCount,
+    '- TOP10のうち少量で暫定: ' + (lowSample || 'なし'),
+    '- 既存週次取得値: ' + kpi.windowStart + '〜' + kpi.windowEnd + ' / 最終取得 ' + kpi.checkedAt,
+    '- 定義: ' + kpi.definition,
+    '- 注意: ' + kpi.caveat + (kpi.gscRowsComplete ? '' : ' GSC取得上限到達または完全性未確認。'),
+    '- カテゴリー掛け合わせは補助指標。SEO変更の効果は再クロール後の期間で比較する。',
+    '', '',
+  ].join('\n');
 }
 
 function brandRankReplaceRows_(sheetName, headers, rows) {
@@ -514,6 +606,13 @@ function brandRankRun_(manual) {
     const catalog = collectShopifyCatalog_(config);
     if (!catalog.available) throw new Error(catalog.reason || 'Shopify catalog unavailable');
     const vendorRows = brandSeoActiveVendorRows_(catalog.products);
+    const inStockByVendor = {};
+    (catalog.products || []).forEach(function (product) {
+      if (product.status === 'ACTIVE' && product.publishedAt && product.onlineStoreUrl &&
+          Number(product.totalInventory) > 0) {
+        inStockByVendor[product.vendor] = (inStockByVendor[product.vendor] || 0) + 1;
+      }
+    });
     const collections = collectBrandSeoCollections_(config);
     const entries = vendorRows.map(function (row) { return brandSeoConfiguration_(row, collections); });
     const products = brandRankProductCatalog_(config);
@@ -566,7 +665,8 @@ function brandRankRun_(manual) {
           collectionMetric.clicks || 0, collectionMetric.impressions || 0,
           collectionMetric.ctr || 0, collectionMetric.position || 0, top10,
           data.complete, (data.complete ? '' : 'Search Console rowLimit 25,000に到達。') +
-            '取得行なしは表示なしの断定不可（匿名化・少量クエリ除外あり）。9/20 SEO変更前の基準値。',
+            '取得行なしはunknown（匿名化・少量クエリ除外あり）。対象期間を確認し、SEO変更の効果は再クロール後の期間で比較する。',
+          inStockByVendor[entry.vendor] || 0,
         ]);
       });
     });

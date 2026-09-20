@@ -296,6 +296,7 @@
         const shopifySkuHealth = health.shopifySku || {};
         const merchantHealth = health.merchant || {};
         const seoHealth = health.seo || {};
+        const brandRank = health.brandRank || {};
         const meoHealth = health.meo || {};
         const productRows = data.products || [];
         const profit = m.contributionProfit === '' || m.contributionProfit == null
@@ -308,7 +309,7 @@
           metric('CPA', money.format(Number(m.cpa || 0)), `CV ${number.format(Number(m.cv || 0))}`),
           metric('広告費', money.format(Number(m.adCost || 0)), `CPC ${money.format(Number(m.cpc || 0))}`),
           metric('CTR', `${(Number(m.ctr || 0) * 100).toFixed(1)}%`, 'Google Ads'),
-          metric('SEOクリック', number.format(Number(m.gscClicks || 0)), `平均順位 ${number.format(Number(m.gscPosition || 0))}`),
+          metric('SEO主要KPI｜ブランド名単体TOP10率', brandRank.available ? `${(brandRank.top10Rate * 100).toFixed(1)}%` : '未取得', brandRank.available ? `${brandRank.top10Count}/${brandRank.brandCount}ブランド / unknown ${brandRank.unknownCount}` : '既存週次監視の取得待ち'),
           metric('Merchant承認', number.format(Number(m.merchantApproved || 0)), `不承認 ${number.format(Number(m.merchantDisapproved || 0))}`),
         ].join('');
         const products = productRows.length
@@ -358,6 +359,31 @@
           : '<div class="empty">改善候補はまだありません。</div>';
         const majorUrls = parseJson(seoHealth.majorUrlSummary, []);
         const indexedUrls = majorUrls.filter(item => item.indexed === true).length;
+        const brandRankSummary = brandRank.available ? `
+          <h3>主要KPI：ブランド名単体でブランドページTOP10</h3>
+          <div class="health-grid">
+            ${healthItem('TOP10 / 全対象', `${brandRank.top10Count}/${brandRank.brandCount}（${(brandRank.top10Rate * 100).toFixed(1)}%）`)}
+            ${healthItem('11〜20位', brandRank.nearTop10Count)}
+            ${healthItem('21位以下', brandRank.lowerRankCount)}
+            ${healthItem('GSC無観測・unknown', brandRank.unknownCount)}
+          </div>
+          <p class="metric-note">既存週次取得値 ${escapeHtml(brandRank.windowStart)}〜${escapeHtml(brandRank.windowEnd)} / 最終取得 ${escapeHtml(brandRank.checkedAt)}</p>
+          <p class="rec-copy">TOP10のうち少量で暫定：${escapeHtml((brandRank.lowSampleTop10 || []).map(item => `${item.brand}「${item.query}」${item.impressions}表示`).join(' / ') || 'なし')}</p>
+          <p class="rec-copy">${escapeHtml(brandRank.definition)} ${escapeHtml(brandRank.caveat)}${brandRank.gscRowsComplete ? '' : ' GSC取得上限到達または完全性未確認。'}</p>
+          <details><summary>全ブランドの採用表記・順位・在庫あり商品数</summary>
+            <div class="table-wrap"><table>
+              <thead><tr><th>ブランド / 採用した単体表記</th><th>判定</th><th class="num">平均順位</th><th class="num">表示</th><th class="num">在庫あり商品数</th></tr></thead>
+              <tbody>${(brandRank.brands || []).map(item => `<tr>
+                <td>${escapeHtml(item.brand)}<br>${escapeHtml(item.query || '未観測')}</td>
+                <td>${escapeHtml(item.status)}${item.lowSample ? '（暫定）' : ''}</td>
+                <td class="num">${item.position == null ? '不明' : number.format(item.position)}</td>
+                <td class="num">${number.format(item.impressions)}</td>
+                <td class="num">${item.inStockProductCount == null ? '未取得' : number.format(item.inStockProductCount)}</td>
+              </tr>`).join('')}</tbody>
+            </table></div>
+          </details>
+          <p class="metric-note">在庫あり商品数は監視取得時の公開中商品で総在庫が正のもの。英字・日本語の個別実績はBrandSEOQueries。カテゴリー掛け合わせは補助指標。SEO変更の効果は再クロール後の期間で比較。</p>
+        ` : `<p class="rec-copy">ブランド名単体TOP10率：未取得。${escapeHtml(brandRank.reason || '既存週次監視の取得待ち。')}</p>`;
         const shopifySkuPanel = `
           <article class="health-panel">
             <h2>Shopify SKU監査</h2>
@@ -391,6 +417,8 @@
         const seoPanel = `
           <article class="health-panel">
             <h2>SEO</h2>
+            ${brandRankSummary}
+            <h3>サイト全体・技術状態</h3>
             <div class="health-grid">
               ${healthItem('クリック', seoHealth.clicks)}
               ${healthItem('表示', seoHealth.impressions)}

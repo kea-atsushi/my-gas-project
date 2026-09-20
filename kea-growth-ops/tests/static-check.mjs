@@ -1172,6 +1172,140 @@ assert.equal(brandMetric.impressions, 15);
 assert.equal(brandMetric.clicks, 3);
 assert.equal(brandMetric.position, 7);
 
+// The existing collection-based KPI keeps unknowns and sparse evidence distinct.
+const kpiRows = [
+  ['SINME', 305, 8.34], ['Agapantha Jewelry', 2, 9.5], ['BATONER', 1, 1],
+  ['Oblada', 31, 14.9], ['Button Works', 23, 11.91], ['SEA', 4, 32.75],
+].map(([brand, impressions, position]) => ({
+  checkedAt: '2026-10-05T09:00:00+09:00', window: 'last_28d',
+  windowStart: '2026-09-05', windowEnd: '2026-10-02', brand,
+  brandQuery: brand === 'SINME' ? 'シンメ' : brand,
+  collectionImpressions: impressions, collectionPosition: position,
+  gscRowsComplete: true, inStockProductCount: 0,
+}));
+for (const brand of coveredBrands) {
+  if (!kpiRows.some(row => row.brand === brand)) {
+    kpiRows.push({ ...kpiRows[0], brand, brandQuery: brand,
+      collectionImpressions: 0, collectionPosition: 0 });
+  }
+}
+kpiRows.push({ ...kpiRows[0], checkedAt: '2026-09-20T09:00:00+09:00', collectionPosition: 100 });
+kpiRows.push({ ...kpiRows[0], window: 'last_3m', collectionPosition: 100 });
+kpiRows.push({ ...kpiRows[0], brand: 'Velnica', brandQueryPosition: 1,
+  brandQueryImpressions: 100, collectionPosition: 0, collectionImpressions: 0,
+  inStockProductCount: '' });
+const kpi = brandContext.brandRankKpiFromRows_(kpiRows);
+assert.equal(kpi.brandCount, 16);
+assert.equal(kpi.top10Count, 3);
+assert.equal(kpi.top10Rate, 3 / 16);
+assert.equal(kpi.unknownCount, 10);
+assert.equal(kpi.nearTop10Count, 2);
+assert.equal(kpi.lowerRankCount, 1);
+assert.equal(kpi.lowSampleTop10.length, 2);
+assert.equal(kpi.brands.find(row => row.brand === 'Velnica').status, 'unknown',
+  'a product/old landing page in TOP10 is not brand-collection success');
+assert.equal(kpi.brands.find(row => row.brand === 'Velnica').inStockProductCount, null);
+assert.equal(kpi.brands.find(row => row.brand === 'SINME').inStockProductCount, 0);
+assert.equal(kpi.checkedAt, '2026-10-05T09:00:00+09:00');
+assert.equal(brandContext.brandRankKpiFromRows_([]).available, false);
+assert.equal(brandContext.brandRankKpiFromRows_(kpiRows.map(row => ({ ...row,
+  gscRowsComplete: false }))).gscRowsComplete, false);
+const changedCatalogRows = [
+  { ...kpiRows[0], checkedAt: '2026-10-12T09:00:00+09:00' },
+  { ...kpiRows[0], checkedAt: '2026-10-12T09:00:00+09:00', brand: 'New Active Brand',
+    collectionPosition: 0, collectionImpressions: 0 },
+];
+const changedCatalogKpi = brandContext.brandRankKpiFromRows_([...kpiRows, ...changedCatalogRows]);
+assert.equal(changedCatalogKpi.brandCount, 2, 'retired brands must leave the latest denominator');
+assert.equal(changedCatalogKpi.top10Rate, 1 / 2);
+assert.equal(changedCatalogKpi.unknownCount, 1);
+assert.equal(changedCatalogKpi.brands.some(row => row.brand === 'BATONER'), false);
+assert.equal(changedCatalogKpi.brands.some(row => row.brand === 'New Active Brand'), true,
+  'a new active brand must be counted without editing alias references');
+
+// Extending the summary must preserve the previous 24-column observation history.
+const summaryHeaders = vm.runInContext('KEA_BRAND_RANK_SUMMARY_HEADERS_', brandContext);
+let headerWrites = 0;
+const oldHistory = [['historic observation', 'must survive']];
+const summaryRange = {
+  getValues: () => [[...summaryHeaders.slice(0, 24), '']],
+  setValues: rows => { assert.equal(rows[0][24], 'inStockProductCount'); headerWrites++; return summaryRange; },
+  setBackground: () => summaryRange, setFontColor: () => summaryRange, setFontWeight: () => summaryRange,
+};
+brandContext.getDashboardSpreadsheet_ = () => ({ getSheetByName: () => ({
+  getRange: () => summaryRange, setFrozenRows() {},
+  clearContents: () => { oldHistory.length = 0; },
+}) });
+brandContext.brandRankEnsureSheet_('BrandSEOBrandRank', summaryHeaders);
+assert.equal(headerWrites, 1);
+assert.equal(oldHistory.length, 1);
+
+// The monitor adds stock counts from its existing catalog; no new fetch is needed.
+let rankFetches = 0;
+let appendedSummary = [];
+brandContext.keaConfig_ = () => ({});
+brandContext.collectShopifyCatalog_ = () => ({ available: true, products: [
+  { vendor: 'SINME', status: 'ACTIVE', publishedAt: 'date', onlineStoreUrl: 'url', totalInventory: 2 },
+  { vendor: 'SINME', status: 'ACTIVE', publishedAt: 'date', onlineStoreUrl: 'url', totalInventory: 0 },
+  { vendor: 'SINME', status: 'ACTIVE', publishedAt: null, onlineStoreUrl: 'url', totalInventory: 9 },
+] });
+brandContext.brandSeoActiveVendorRows_ = () => [{ vendor: 'SINME', productCount: 2 },
+  { vendor: 'BATONER', productCount: 1 }];
+brandContext.collectBrandSeoCollections_ = () => [];
+brandContext.brandSeoConfiguration_ = row => ({ ...row, collectionUrl: `https://example.test/${row.vendor}` });
+brandContext.brandRankProductCatalog_ = () => [];
+brandContext.brandRankCurrentWindows_ = () => ['last_28d', 'previous_28d', 'last_3m', 'previous_3m']
+  .map(key => ({ key, start: new Date('2026-09-05'), end: new Date('2026-10-02') }));
+brandContext.brandRankSearchConsoleQueryPageRows_ = () => { rankFetches++; return { rows: [], complete: true }; };
+brandContext.isoTimestamp_ = date => date.toISOString();
+brandContext.dateKey_ = date => date.toISOString().slice(0, 10);
+brandContext.brandRankOldEcChecks_ = () => [];
+brandContext.brandRankEntryTech_ = () => [];
+brandContext.brandRankReplaceRows_ = () => {};
+brandContext.brandRankAppendRows_ = (_name, headers, rows) => {
+  assert.equal(headers.length, 25);
+  appendedSummary = rows;
+};
+brandContext.brandRankRun_(true);
+assert.equal(rankFetches, 4);
+assert.equal(appendedSummary.length, 8);
+assert.ok(appendedSummary.every(row => row.length === 25 && !row[23].includes('9/20')));
+assert.ok(appendedSummary.filter(row => row[4] === 'SINME').every(row => row[24] === 1));
+assert.ok(appendedSummary.filter(row => row[4] === 'BATONER').every(row => row[24] === 0));
+brandContext.rowObject_ = context.rowObject_;
+brandContext.getDashboardSpreadsheet_ = () => ({ getSheetByName: () => ({
+  getDataRange: () => ({ getValues: () => [summaryHeaders, ...appendedSummary] }),
+}) });
+assert.equal(brandContext.readBrandRankKpi_().brands.find(row => row.brand === 'SINME').inStockProductCount, 1);
+assert.equal(rankFetches, 4, 'reading a daily/dashboard KPI must not rerun GSC');
+brandContext.readBrandRankKpi_ = () => kpi;
+const kpiReport = brandContext.buildBrandRankKpiSummary_();
+assert.match(kpiReport, /3\/16ブランド（18.8%/);
+assert.match(kpiReport, /unknown: 10/);
+assert.match(kpiReport, /2026-10-05/);
+assert.doesNotMatch(kpiReport, /9\/20.*基準値/);
+assert.match(kpiReport, /1〜2表示は暫定/);
+assert.match(kpiReport, /対象ブランドコレクション/);
+brandContext.readBrandRankKpi_ = () => ({ available: false, reason: 'read failed' });
+assert.match(brandContext.buildBrandRankKpiSummary_(), /未取得.*read failed/);
+
+// Render the same KPI ahead of site-wide SEO values and retain escaped text.
+const elements = { content: {}, status: {}, sheetLink: {} };
+const renderContext = vm.createContext({
+  Intl, console, document: { getElementById: id => elements[id] },
+  google: { script: { run: { withSuccessHandler() { return this; },
+    withFailureHandler() { return this; }, getDashboardData() {} } } },
+});
+new vm.Script(dashboardScript[1]).runInContext(renderContext);
+renderContext.render({ health: { brandRank: kpi } });
+assert.match(elements.content.innerHTML, /GSC無観測・unknown/);
+assert.match(elements.content.innerHTML, /18.8%/);
+assert.ok(elements.content.innerHTML.indexOf('主要KPI：') < elements.content.innerHTML.indexOf('サイト全体・技術状態'));
+renderContext.render({ health: { brandRank: { ...kpi, definition: '<script>invalid</script>' } } });
+assert.ok(!elements.content.innerHTML.includes('<script>invalid</script>'));
+renderContext.render({ health: { brandRank: { available: false } } });
+assert.match(elements.content.innerHTML, /ブランド名単体TOP10率：未取得/);
+
 console.log(
   JSON.stringify(
     {
@@ -1180,6 +1314,8 @@ console.log(
       checks: 152,
       gasUnitTests: gasUnitResults.length,
       brandQueryCoverage: coveredBrands.length,
+      brandNameKpi: { top10: kpi.top10Count, unknown: kpi.unknownCount,
+        provisionalTop10: kpi.lowSampleTop10.length, historyPreserved: true },
     },
     null,
     2,

@@ -120,6 +120,7 @@ function runDailyGrowthReport(force) {
       );
       const notificationFindings = dailyFindingNotificationDelta_(findings);
       const report =
+        buildBrandRankKpiSummary_() +
         buildDecisionSummary_(findings) + '\n\n' +
         buildNarrative_(
           'daily',
@@ -243,6 +244,7 @@ function runWeeklyGrowthProposal(force) {
       );
       const recommendations = buildWeeklyRecommendations_(snapshot, data);
       const report =
+        buildBrandRankKpiSummary_() +
         buildNarrative_(
           'weekly',
           snapshot,

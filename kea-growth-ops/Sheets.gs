@@ -510,6 +510,7 @@ function readDashboardData_() {
       shopifySku: healthReadJsonProperty_('KEA_HEALTH_STATE_SHOPIFY_SKU', {}),
       merchant: readLatestHealthRow_('MerchantHealth'),
       seo: readLatestHealthRow_('SEOHealth'),
+      brandRank: readBrandRankKpi_(),
       meo: readLatestHealthRow_('MEOHealth'),
     },
   };
