@@ -1144,6 +1144,36 @@ const brandContext = vm.createContext({
 new vm.Script(fs.readFileSync(path.join(root, "BrandRankMonitoring.gs"), "utf8"))
   .runInContext(brandContext);
 const coveredBrands = vm.runInContext("Object.keys(KEA_BRAND_QUERY_REFERENCES_)", brandContext);
+brandContext.dateDaysAgo_ = n => new Date(Date.UTC(2026, 8, 30 - n));
+brandContext.dateKey_ = date => date.toISOString().slice(0, 10);
+const rankWindows = brandContext.brandRankCurrentWindows_();
+assert.equal(rankWindows.length, 6);
+assert.equal(rankWindows.find(row => row.key === 'last_7d').start.toISOString().slice(0, 10), '2026-09-21');
+assert.equal(rankWindows.find(row => row.key === 'previous_7d').end.toISOString().slice(0, 10), '2026-09-20');
+assert.equal(brandContext.brandRankExpiredPrefix_([['2026-05-01'], ['2026-09-01']], new Date('2026-09-30')), 1);
+assert.equal(brandContext.brandRankExpiredPrefix_([['invalid'], ['2026-05-01']], new Date('2026-09-30')), 0);
+let rankTriggers = ['runBrandNameRankMonitor', 'runBrandNameRankMonitor', 'runDailyGrowthReport']
+  .map(handler => ({ getHandlerFunction: () => handler }));
+const rankSchedule = {};
+brandContext.KEA_DEFAULTS = { TIME_ZONE: 'Asia/Tokyo' };
+brandContext.Logger = { log() {} };
+brandContext.ScriptApp = {
+  getProjectTriggers: () => rankTriggers,
+  deleteTrigger: trigger => { rankTriggers = rankTriggers.filter(item => item !== trigger); },
+  newTrigger: handler => {
+    const builder = { timeBased() { return this; },
+      atHour(value) { rankSchedule.hour = value; return this; },
+      nearMinute(value) { rankSchedule.minute = value; return this; },
+      everyDays(value) { rankSchedule.days = value; return this; },
+      inTimezone(value) { rankSchedule.timezone = value; return this; },
+      create() { rankTriggers.push({ getHandlerFunction: () => handler }); } };
+    return builder;
+  },
+};
+assert.equal(brandContext.ensureBrandNameRankMonitorTrigger().count, 1);
+assert.equal(brandContext.ensureBrandNameRankMonitorTrigger().count, 1);
+assert.equal(rankTriggers.length, 2, 'keep the other daily report trigger and one rank trigger');
+assert.deepEqual(rankSchedule, { hour: 6, minute: 0, days: 1, timezone: 'Asia/Tokyo' });
 assert.equal(coveredBrands.length, 16);
 for (const vendor of coveredBrands) {
   const entry = { vendor, collectionUrl: "https://example.test/brand",
@@ -1233,6 +1263,27 @@ assert.equal(kpi.brands.find(row => row.brand === 'Velnica').status, 'unknown',
 assert.equal(kpi.brands.find(row => row.brand === 'Velnica').inStockProductCount, null);
 assert.equal(kpi.brands.find(row => row.brand === 'SINME').inStockProductCount, 0);
 assert.equal(kpi.checkedAt, '2026-10-05T09:00:00+09:00');
+const trendBase = { checkedAt: kpi.checkedAt, brand: 'SINME', query: 'シンメ',
+  axis: 'ブランド名単体', collectionUrl: kpi.brands.find(row => row.brand === 'SINME').collectionUrl,
+  collectionImpressions: 30, collectionClicks: 3, collectionCtr: 0.1,
+  collectionPosition: 8, windowStart: '2026-09-21', gscRowsComplete: true };
+const trendRows = [
+  { ...trendBase, window: 'last_7d' },
+  { ...trendBase, window: 'previous_7d', collectionPosition: 12, collectionClicks: 1 },
+  { ...trendBase, window: 'previous_7d', query: 'SINME', collectionPosition: 1 },
+  { ...trendBase, window: 'previous_7d', collectionUrl: 'https://wrong.test/', collectionPosition: 1 },
+  { ...trendBase, window: 'previous_7d', checkedAt: '2026-09-01', collectionPosition: 1 },
+];
+const trend = brandContext.brandRankFocusTrends_(kpi, trendRows, true).find(row => row.brand === 'SINME');
+assert.equal(trend.seven.rankImprovement, 4, 'do not compare another alias, page, or collection run');
+assert.equal(trend.seven.status, '改善傾向');
+assert.equal(trend.seven.postChange, true);
+assert.equal(trend.twentyEight.status, '比較不可');
+assert.equal(brandContext.brandRankCompare_({ ...trendBase, collectionImpressions: 1 }, trendBase, true).status, '少量・参考');
+assert.equal(brandContext.brandRankCompare_({ ...trendBase, collectionImpressions: 0 }, trendBase, true).status, '片期間未観測');
+assert.equal(brandContext.brandRankCompare_({ ...trendBase, gscRowsComplete: false }, trendBase, true).status, '比較不可');
+assert.equal(brandContext.brandRankCompare_(trendBase, trendBase, false).status, '比較不可');
+assert.equal(brandContext.brandRankCompare_({ ...trendBase, windowStart: new Date('2026-09-01') }, trendBase, true).postChange, false);
 assert.equal(brandContext.brandRankKpiFromRows_([]).available, false);
 assert.equal(brandContext.brandRankKpiFromRows_(kpiRows.map(row => ({ ...row,
   gscRowsComplete: false }))).gscRowsComplete, false);
@@ -1281,7 +1332,7 @@ brandContext.brandSeoActiveVendorRows_ = () => [{ vendor: 'SINME', productCount:
 brandContext.collectBrandSeoCollections_ = () => [];
 brandContext.brandSeoConfiguration_ = row => ({ ...row, collectionUrl: `https://example.test/${row.vendor}` });
 brandContext.brandRankProductCatalog_ = () => [];
-brandContext.brandRankCurrentWindows_ = () => ['last_28d', 'previous_28d', 'last_3m', 'previous_3m']
+brandContext.brandRankCurrentWindows_ = () => ['last_7d', 'previous_7d', 'last_28d', 'previous_28d', 'last_3m', 'previous_3m']
   .map(key => ({ key, start: new Date('2026-09-05'), end: new Date('2026-10-02') }));
 brandContext.brandRankSearchConsoleQueryPageRows_ = () => { rankFetches++; return { rows: [], complete: true }; };
 brandContext.isoTimestamp_ = date => date.toISOString();
@@ -1294,8 +1345,8 @@ brandContext.brandRankAppendRows_ = (_name, headers, rows) => {
   appendedSummary = rows;
 };
 brandContext.brandRankRun_(true);
-assert.equal(rankFetches, 4);
-assert.equal(appendedSummary.length, 8);
+assert.equal(rankFetches, 6);
+assert.equal(appendedSummary.length, 12);
 assert.ok(appendedSummary.every(row => row.length === 25 && !row[23].includes('9/20')));
 assert.ok(appendedSummary.filter(row => row[4] === 'SINME').every(row => row[24] === 1));
 assert.ok(appendedSummary.filter(row => row[4] === 'BATONER').every(row => row[24] === 0));
@@ -1304,8 +1355,9 @@ brandContext.getDashboardSpreadsheet_ = () => ({ getSheetByName: () => ({
   getDataRange: () => ({ getValues: () => [summaryHeaders, ...appendedSummary] }),
 }) });
 assert.equal(brandContext.readBrandRankKpi_().brands.find(row => row.brand === 'SINME').inStockProductCount, 1);
-assert.equal(rankFetches, 4, 'reading a daily/dashboard KPI must not rerun GSC');
+assert.equal(rankFetches, 6, 'reading a daily/dashboard KPI must not rerun GSC');
 brandContext.readBrandRankKpi_ = () => kpi;
+kpi.focusTrends = [trend];
 const kpiReport = brandContext.buildBrandRankKpiSummary_();
 assert.match(kpiReport, /3\/16ブランド（18.8%/);
 assert.match(kpiReport, /unknown: 10/);
@@ -1314,6 +1366,7 @@ assert.match(kpiReport, /2026-10-05/);
 assert.doesNotMatch(kpiReport, /9\/20.*基準値/);
 assert.match(kpiReport, /1〜2表示は暫定/);
 assert.match(kpiReport, /対象ブランドコレクション/);
+assert.match(kpiReport, /7日: 順位 12.00→8.00/);
 brandContext.readBrandRankKpi_ = () => ({ available: false, reason: 'read failed' });
 assert.match(brandContext.buildBrandRankKpiSummary_(), /未取得.*read failed/);
 
@@ -1328,6 +1381,7 @@ new vm.Script(dashboardScript[1]).runInContext(renderContext);
 renderContext.render({ health: { brandRank: kpi } });
 assert.match(elements.content.innerHTML, /GSC無観測・unknown/);
 assert.match(elements.content.innerHTML, /18.8%/);
+assert.match(elements.content.innerHTML, /12.00→8.00/);
 assert.ok(elements.content.innerHTML.indexOf('主要KPI：') < elements.content.innerHTML.indexOf('サイト全体・技術状態'));
 renderContext.render({ health: { brandRank: { ...kpi, definition: '<script>invalid</script>' } } });
 assert.ok(!elements.content.innerHTML.includes('<script>invalid</script>'));
