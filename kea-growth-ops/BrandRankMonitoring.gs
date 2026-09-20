@@ -537,7 +537,8 @@ function brandRankCompare_(current, previous, fresh) {
   if (current && previous && fresh &&
       (current.gscRowsComplete === true || current.gscRowsComplete === 'TRUE') &&
       (previous.gscRowsComplete === true || previous.gscRowsComplete === 'TRUE')) {
-    status = a.position == null || b.position == null ? '片期間未観測' :
+    status = a.position == null && b.position == null ? '両期間未観測' :
+      a.position == null || b.position == null ? '片期間未観測' :
       Math.min(a.impressions, b.impressions) < 10 ? '少量・参考' :
       b.position - a.position >= 1 ? '改善傾向' :
       b.position - a.position <= -1 ? '悪化傾向' : '概ね横ばい';
