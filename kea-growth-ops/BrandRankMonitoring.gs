@@ -61,8 +61,8 @@ const KEA_BRAND_QUERY_REFERENCES_ = {
     "companies": [
       "Agapantha Jewelry"
     ],
-    "source": "https://www.agapantha.com/pages/about",
-    "note": "公式屋号。法人名は未確認"
+    "source": "https://www.agapantha.com/pages/faq",
+    "note": "公式事業表記 Agapantha Jewelry。海外の個人による運営（取引先確認）"
   },
   "BATONER": {
     "aliases": [
@@ -209,8 +209,8 @@ const KEA_BRAND_QUERY_REFERENCES_ = {
       "株式会社AKM",
       "AKM"
     ],
-    "source": "https://gisuco.com/",
-    "note": "制作会社の取引実績表記。現行運営法人は要確認"
+    "source": "https://mikomori.us.com/policies/legal-notice",
+    "note": "現行公式サイトの特定商取引法に基づく表記：販売事業者 株式会社AKM"
   }
 };
 
