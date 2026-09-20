@@ -369,12 +369,13 @@
           </div>
           <p class="metric-note">既存週次取得値 ${escapeHtml(brandRank.windowStart)}〜${escapeHtml(brandRank.windowEnd)} / 最終取得 ${escapeHtml(brandRank.checkedAt)}</p>
           <p class="rec-copy">TOP10のうち少量で暫定：${escapeHtml((brandRank.lowSampleTop10 || []).map(item => `${item.brand}「${item.query}」${item.impressions}表示`).join(' / ') || 'なし')}</p>
+          <p class="rec-copy"><strong>重点ブランド（優先対応）：</strong>${escapeHtml((brandRank.focusBrands || []).map(item => `${item.brand}: ${item.position == null ? '未観測' : `${item.position.toFixed(2)}位${item.lowSample ? '（暫定）' : ''}`}`).join(' / ') || '今回の取得対象なし')}</p>
           <p class="rec-copy">${escapeHtml(brandRank.definition)} ${escapeHtml(brandRank.caveat)}${brandRank.gscRowsComplete ? '' : ' GSC取得上限到達または完全性未確認。'}</p>
           <details><summary>全ブランドの採用表記・順位・在庫あり商品数</summary>
             <div class="table-wrap"><table>
               <thead><tr><th>ブランド / 採用した単体表記</th><th>判定</th><th class="num">平均順位</th><th class="num">表示</th><th class="num">在庫あり商品数</th></tr></thead>
               <tbody>${(brandRank.brands || []).map(item => `<tr>
-                <td>${escapeHtml(item.brand)}<br>${escapeHtml(item.query || '未観測')}</td>
+                <td>${item.focus ? '【重点】' : ''}${escapeHtml(item.brand)}<br>${escapeHtml(item.query || '未観測')}</td>
                 <td>${escapeHtml(item.status)}${item.lowSample ? '（暫定）' : ''}</td>
                 <td class="num">${item.position == null ? '不明' : number.format(item.position)}</td>
                 <td class="num">${number.format(item.impressions)}</td>

@@ -10,6 +10,8 @@ const KEA_BRAND_RANK_QUERY_SHEET_ = 'BrandSEOQueries';
 const KEA_BRAND_RANK_TECH_SHEET_ = 'BrandSEOTechnical';
 const KEA_BRAND_RANK_LEASE_KEY_ = 'KEA_BRAND_RANK_MONITOR_LEASE_V1';
 const KEA_BRAND_RANK_TRIGGER_HANDLER_ = 'runBrandNameRankMonitor';
+// Owner-selected priorities. All current brands remain in the main KPI.
+const KEA_BRAND_RANK_FOCUS_BRANDS_ = ['Oblada', 'SEA', 'BATONER', "LEVI'S", 'SINME'];
 
 const KEA_BRAND_RANK_SUMMARY_HEADERS_ = [
   'checkedAt', 'window', 'windowStart', 'windowEnd', 'brand', 'english',
@@ -473,7 +475,11 @@ function brandRankKpiFromRows_(rows) {
   const byBrand = {};
   current.forEach(function (row) { byBrand[row.brand] = row; });
   // The latest catalog-backed run defines active brands, not the alias reference.
-  const brands = Object.keys(byBrand);
+  const brands = KEA_BRAND_RANK_FOCUS_BRANDS_.filter(function (brand) {
+    return Object.prototype.hasOwnProperty.call(byBrand, brand);
+  }).concat(Object.keys(byBrand).filter(function (brand) {
+    return KEA_BRAND_RANK_FOCUS_BRANDS_.indexOf(brand) < 0;
+  }));
   const items = brands.map(function (brand) {
     const row = byBrand[brand] || {};
     const impressions = Number(row.collectionImpressions || 0);
@@ -481,6 +487,7 @@ function brandRankKpiFromRows_(rows) {
     const observed = impressions > 0 && isFinite(position) && position > 0;
     return {
       brand: brand, query: row.brandQuery || '', collectionUrl: row.collectionUrl || '',
+      focus: KEA_BRAND_RANK_FOCUS_BRANDS_.indexOf(brand) >= 0,
       clicks: Number(row.collectionClicks || 0), impressions: impressions,
       ctr: Number(row.collectionCtr || 0), position: observed ? position : null,
       status: !observed ? 'unknown' : position <= 10 ? 'TOP10' : position <= 20 ? '11–20' : '21以下',
@@ -510,6 +517,7 @@ function brandRankKpiFromRows_(rows) {
     definition: '英字・日本語等の単体表記のうち、対象ブランドコレクションの平均順位が最良の表記（同順位は表示数順）を採用。商品・旧URLの順位は成功に含めない。',
     caveat: 'GSC無観測はunknownで、TOP10外や表示ゼロとは断定しない。1〜2表示は暫定。平均順位は実際の全検索での固定順位ではない。各表記はBrandSEOQueriesを参照。',
     brands: items,
+    focusBrands: items.filter(function (item) { return item.focus; }),
   };
 }
 
@@ -533,12 +541,17 @@ function buildBrandRankKpiSummary_() {
   const lowSample = kpi.lowSampleTop10.map(function (item) {
     return item.brand + '「' + item.query + '」' + item.impressions + '表示';
   }).join(' / ');
+  const focusSummary = kpi.focusBrands.map(function (item) {
+    return item.brand + ': ' + (item.position == null ? '未観測' :
+      item.position.toFixed(2) + '位' + (item.lowSample ? '（暫定）' : ''));
+  }).join(' / ');
   return [
     'SEO主要KPI｜ブランド名単体でブランドページTOP10',
     '- ' + kpi.top10Count + '/' + kpi.brandCount + 'ブランド（' +
       (kpi.top10Rate * 100).toFixed(1) + '%、全対象が分母） / 11〜20位: ' +
       kpi.nearTop10Count + ' / 21位以下: ' + kpi.lowerRankCount + ' / unknown: ' + kpi.unknownCount,
     '- TOP10のうち少量で暫定: ' + (lowSample || 'なし'),
+    '- 重点ブランド（優先対応）: ' + (focusSummary || '今回の取得対象なし'),
     '- 既存週次取得値: ' + kpi.windowStart + '〜' + kpi.windowEnd + ' / 最終取得 ' + kpi.checkedAt,
     '- 定義: ' + kpi.definition,
     '- 注意: ' + kpi.caveat + (kpi.gscRowsComplete ? '' : ' GSC取得上限到達または完全性未確認。'),

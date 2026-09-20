@@ -1220,6 +1220,8 @@ kpiRows.push({ ...kpiRows[0], brand: 'Velnica', brandQueryPosition: 1,
   inStockProductCount: '' });
 const kpi = brandContext.brandRankKpiFromRows_(kpiRows);
 assert.equal(kpi.brandCount, 16);
+assert.deepEqual(Array.from(kpi.focusBrands, item => item.brand), ['Oblada', 'SEA', 'BATONER', "LEVI'S", 'SINME']);
+assert.deepEqual(Array.from(kpi.brands.slice(0, 5), item => item.brand), Array.from(kpi.focusBrands, item => item.brand));
 assert.equal(kpi.top10Count, 3);
 assert.equal(kpi.top10Rate, 3 / 16);
 assert.equal(kpi.unknownCount, 10);
@@ -1241,6 +1243,7 @@ const changedCatalogRows = [
 ];
 const changedCatalogKpi = brandContext.brandRankKpiFromRows_([...kpiRows, ...changedCatalogRows]);
 assert.equal(changedCatalogKpi.brandCount, 2, 'retired brands must leave the latest denominator');
+assert.equal(changedCatalogKpi.focusBrands.length, 1, 'focus selection must not reintroduce retired brands');
 assert.equal(changedCatalogKpi.top10Rate, 1 / 2);
 assert.equal(changedCatalogKpi.unknownCount, 1);
 assert.equal(changedCatalogKpi.brands.some(row => row.brand === 'BATONER'), false);
@@ -1306,6 +1309,7 @@ brandContext.readBrandRankKpi_ = () => kpi;
 const kpiReport = brandContext.buildBrandRankKpiSummary_();
 assert.match(kpiReport, /3\/16ブランド（18.8%/);
 assert.match(kpiReport, /unknown: 10/);
+assert.match(kpiReport, /重点ブランド（優先対応）: Oblada:.*SEA:.*BATONER:.*LEVI'S: 未観測.*SINME:/);
 assert.match(kpiReport, /2026-10-05/);
 assert.doesNotMatch(kpiReport, /9\/20.*基準値/);
 assert.match(kpiReport, /1〜2表示は暫定/);
