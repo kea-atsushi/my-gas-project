@@ -1281,6 +1281,9 @@ assert.equal(trend.seven.postChange, true);
 assert.equal(trend.twentyEight.status, '比較不可');
 assert.equal(brandContext.brandRankCompare_({ ...trendBase, collectionImpressions: 1 }, trendBase, true).status, '少量・参考');
 assert.equal(brandContext.brandRankCompare_({ ...trendBase, collectionImpressions: 0 }, trendBase, true).status, '片期間未観測');
+assert.equal(brandContext.brandRankCompare_(
+  { ...trendBase, collectionImpressions: 0 }, { ...trendBase, collectionImpressions: 0 }, true,
+).status, '両期間未観測');
 assert.equal(brandContext.brandRankCompare_({ ...trendBase, gscRowsComplete: false }, trendBase, true).status, '比較不可');
 assert.equal(brandContext.brandRankCompare_(trendBase, trendBase, false).status, '比較不可');
 assert.equal(brandContext.brandRankCompare_({ ...trendBase, windowStart: new Date('2026-09-01') }, trendBase, true).postChange, false);
