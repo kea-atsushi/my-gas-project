@@ -167,7 +167,13 @@ const KEA_BRAND_QUERY_REFERENCES_ = {
       "株式会社INOD",
       "INOD"
     ],
-    "source": "https://suicoke.com/pages/terms-conditions"
+    "source": "https://suicoke.com/pages/terms-conditions",
+    "verifiedProductCategories": {
+      "product-7272": {
+        "categories": ["バッグ"],
+        "source": "https://store.kea.co.jp/products/product-7272"
+      }
+    }
   },
   "Velnica": {
     "aliases": [
@@ -247,7 +253,21 @@ function brandRankJapaneseAliases_(aliases) {
   });
 }
 
-function brandRankCategories_(entry) {
+function brandRankCategories_(entry, vendorProducts) {
+  const reference = KEA_BRAND_QUERY_REFERENCES_[String(entry && entry.vendor || '')] || {};
+  if (reference.verifiedProductCategories) {
+    // A verified-product override must never fall back to title-derived guesses.
+    const categories = [];
+    (vendorProducts || []).forEach(function (product) {
+      if (product.vendor !== entry.vendor || product.status !== 'ACTIVE' ||
+          !product.publishedAt || !product.onlineStoreUrl) return;
+      const verified = reference.verifiedProductCategories[product.handle];
+      (verified && verified.categories || []).forEach(function (category) {
+        if (categories.indexOf(category) < 0) categories.push(category);
+      });
+    });
+    return categories;
+  }
   const title = String(entry && entry.collection && entry.collection.seo &&
     entry.collection.seo.title || '');
   const pieces = title.split('｜').map(function (value) { return value.trim(); });
@@ -336,7 +356,7 @@ function brandRankTargetRows_(entries, products) {
   });
   (entries || []).forEach(function (entry) {
     const aliases = brandRankAliases_(entry);
-    const categories = brandRankCategories_(entry);
+    const categories = brandRankCategories_(entry, byVendor[entry.vendor] || []);
     aliases.forEach(function (alias) {
       add({ brand: entry.vendor, axis: 'ブランド名単体', query: alias,
         queryVariant: brandRankJapaneseAliases_([alias]).length ? '日本語' : '英字・表記',
