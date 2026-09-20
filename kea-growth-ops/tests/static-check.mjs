@@ -1129,6 +1129,49 @@ assert.equal(
   "health monitoring must not add a duplicate trigger",
 );
 
+// Exercise query coverage and lease ownership without any external calls.
+let brandLease = "";
+const brandContext = vm.createContext({
+  Date, JSON, Math, Number, String,
+  LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) },
+  PropertiesService: { getScriptProperties: () => ({
+    getProperty: () => brandLease,
+    setProperty: (_key, value) => { brandLease = value; },
+    deleteProperty: () => { brandLease = ""; },
+  }) },
+  Utilities: { getUuid: () => "test-owner" },
+});
+new vm.Script(fs.readFileSync(path.join(root, "BrandRankMonitoring.gs"), "utf8"))
+  .runInContext(brandContext);
+const coveredBrands = vm.runInContext("Object.keys(KEA_BRAND_QUERY_REFERENCES_)", brandContext);
+assert.equal(coveredBrands.length, 16);
+for (const vendor of coveredBrands) {
+  const entry = { vendor, collectionUrl: "https://example.test/brand",
+    collection: { seo: { title: `${vendor}｜実在カテゴリー` } } };
+  assert.ok(brandContext.brandRankJapaneseAliases_(brandContext.brandRankAliases_(entry)).length);
+  const queries = brandContext.brandRankTargetRows_([entry], []);
+  assert.ok(queries.some((row) => row.axis === "ブランド会社名・運営会社名" && row.query));
+  assert.ok(queries.filter((row) => row.category).every((row) => row.category === "実在カテゴリー"));
+}
+assert.equal(brandContext.brandRankCategories_({ vendor: "SINME" }).length, 0);
+brandLease = `${Date.now() + 60000}|existing-owner`;
+assert.equal(brandContext.brandRankAcquireLease_(), "");
+assert.ok(brandLease.endsWith("|existing-owner"));
+brandLease = "";
+const brandLeaseToken = brandContext.brandRankAcquireLease_();
+assert.ok(brandLeaseToken);
+brandContext.brandRankReleaseLease_("other-owner");
+assert.ok(brandLease);
+brandContext.brandRankReleaseLease_(brandLeaseToken);
+assert.equal(brandLease, "");
+const brandMetric = brandContext.brandRankMetric_([
+  { keys: ["シンメ", "https://example.test/brand"], clicks: 2, impressions: 10, position: 5 },
+  { keys: ["シンメ", "https://example.test/product"], clicks: 1, impressions: 5, position: 11 },
+], "シンメ", "https://example.test/brand");
+assert.equal(brandMetric.impressions, 15);
+assert.equal(brandMetric.clicks, 3);
+assert.equal(brandMetric.position, 7);
+
 console.log(
   JSON.stringify(
     {
@@ -1136,6 +1179,7 @@ console.log(
       gasFiles: gasFiles.length,
       checks: 152,
       gasUnitTests: gasUnitResults.length,
+      brandQueryCoverage: coveredBrands.length,
     },
     null,
     2,
