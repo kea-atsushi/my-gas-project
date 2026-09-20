@@ -291,6 +291,8 @@ function brandRankNormalizeQuery_(value) {
 
 function brandRankCurrentWindows_() {
   return [
+    { key: 'last_7d', start: dateDaysAgo_(9), end: dateDaysAgo_(3) },
+    { key: 'previous_7d', start: dateDaysAgo_(16), end: dateDaysAgo_(10) },
     { key: 'last_28d', start: dateDaysAgo_(30), end: dateDaysAgo_(3) },
     { key: 'previous_28d', start: dateDaysAgo_(58), end: dateDaysAgo_(31) },
     { key: 'last_3m', start: dateDaysAgo_(92), end: dateDaysAgo_(3) },
@@ -461,7 +463,7 @@ function brandRankEnsureSheet_(name, headers) {
   return sheet;
 }
 
-/** Pure aggregation of the existing weekly collection-ranking observations. */
+/** Pure aggregation of the existing collection-ranking observations. */
 function brandRankKpiFromRows_(rows) {
   const candidates = (rows || []).filter(function (row) {
     return row.window === 'last_28d' && row.checkedAt;
@@ -521,6 +523,63 @@ function brandRankKpiFromRows_(rows) {
   };
 }
 
+/** Compare the same query and collection, never independently chosen aliases. */
+function brandRankCompare_(current, previous, fresh) {
+  const metric = function (row) {
+    const impressions = Number(row && row.collectionImpressions || 0);
+    const position = Number(row && row.collectionPosition || 0);
+    return { impressions: impressions, clicks: Number(row && row.collectionClicks || 0),
+      ctr: Number(row && row.collectionCtr || 0),
+      position: impressions > 0 && position > 0 && isFinite(position) ? position : null };
+  };
+  const a = metric(current), b = metric(previous);
+  let status = '比較不可';
+  if (current && previous && fresh &&
+      (current.gscRowsComplete === true || current.gscRowsComplete === 'TRUE') &&
+      (previous.gscRowsComplete === true || previous.gscRowsComplete === 'TRUE')) {
+    status = a.position == null || b.position == null ? '片期間未観測' :
+      Math.min(a.impressions, b.impressions) < 10 ? '少量・参考' :
+      b.position - a.position >= 1 ? '改善傾向' :
+      b.position - a.position <= -1 ? '悪化傾向' : '概ね横ばい';
+  }
+  const signed = function (n, digits) { return (n > 0 ? '+' : '') + n.toFixed(digits); };
+  const rank = function (n) { return n == null ? '未観測' : n.toFixed(2); };
+  const delta = a.position == null || b.position == null ? null : b.position - a.position;
+  const dateText = function (value) { return value instanceof Date ? dateKey_(value) : String(value || '未取得'); };
+  const start = current && dateText(current.windowStart);
+  const postChange = /^\d{4}-\d{2}-\d{2}$/.test(start || '') && start > '2026-09-20';
+  const text = !current || !previous ? '比較期間の取得待ち' :
+    '順位 ' + rank(b.position) + '→' + rank(a.position) +
+    (delta == null ? '' : '（改善幅 ' + signed(delta, 2) + '）') +
+    ' / 表示 ' + b.impressions + '→' + a.impressions + '（' + signed(a.impressions - b.impressions, 0) + '）' +
+    ' / クリック ' + b.clicks + '→' + a.clicks + '（' + signed(a.clicks - b.clicks, 0) + '）' +
+    ' / CTR ' + (b.ctr * 100).toFixed(2) + '→' + (a.ctr * 100).toFixed(2) + '%（' + signed((a.ctr - b.ctr) * 100, 2) + 'pt）' +
+    ' / ' + status + (postChange ? '・現期間は変更後' : '・変更前を含む参考比較') +
+    '\n実績期間 ' + dateText(previous.windowStart) + '〜' + dateText(previous.windowEnd) +
+    ' → ' + dateText(current.windowStart) + '〜' + dateText(current.windowEnd);
+  return { current: a, previous: b, rankImprovement: delta, status: status,
+    postChange: postChange, text: text };
+}
+
+function brandRankFocusTrends_(kpi, queryRows, fresh) {
+  const matching = (queryRows || []).filter(function (row) {
+    return row.axis === 'ブランド名単体' &&
+      new Date(row.checkedAt).getTime() === new Date(kpi.checkedAt).getTime();
+  });
+  return (kpi.focusBrands || []).map(function (item) {
+    const byWindow = {};
+    matching.forEach(function (row) {
+      if (row.brand === item.brand && row.collectionUrl === item.collectionUrl &&
+          brandRankNormalizeQuery_(row.query) === brandRankNormalizeQuery_(item.query)) {
+        byWindow[row.window] = row;
+      }
+    });
+    return { brand: item.brand, query: item.query, collectionUrl: item.collectionUrl,
+      seven: brandRankCompare_(byWindow.last_7d, byWindow.previous_7d, fresh),
+      twentyEight: brandRankCompare_(byWindow.last_28d, byWindow.previous_28d, fresh) };
+  });
+}
+
 /** Read saved observations only; daily/dashboard never trigger another collector. */
 function readBrandRankKpi_() {
   try {
@@ -528,7 +587,18 @@ function readBrandRankKpi_() {
     if (!sheet) return brandRankKpiFromRows_([]);
     const values = sheet.getDataRange().getValues();
     const headers = values.shift() || [];
-    return brandRankKpiFromRows_(values.map(function (row) { return rowObject_(headers, row); }));
+    const kpi = brandRankKpiFromRows_(values.map(function (row) { return rowObject_(headers, row); }));
+    if (!kpi.available) return kpi;
+    const fresh = dateKey_(new Date(kpi.checkedAt)) === dateKey_(new Date());
+    kpi.freshnessNote = fresh ? '' : '本日分未更新：前回の保存値です。新たな成果判定は保留。';
+    kpi.observationNote = '毎朝取得するGSC確定値（原則3日前まで）。比較は同一検索語・同一ブランドページ。両期間10表示以上・順位差1以上を運用目安とし、有意差やSEO変更の因果効果を示すものではありません。';
+    const querySheet = getDashboardSpreadsheet_().getSheetByName(KEA_BRAND_RANK_QUERY_SHEET_);
+    const queryValues = querySheet ? querySheet.getDataRange().getValues() : [];
+    const queryHeaders = queryValues.shift() || [];
+    kpi.focusTrends = brandRankFocusTrends_(kpi, queryValues.map(function (row) {
+      return rowObject_(queryHeaders, row);
+    }), fresh);
+    return kpi;
   } catch (error) {
     return { available: false, reason: '保存済みブランド順位を取得できません: ' + error.message };
   }
@@ -537,7 +607,7 @@ function readBrandRankKpi_() {
 function buildBrandRankKpiSummary_() {
   const kpi = readBrandRankKpi_();
   if (!kpi.available) return 'SEO主要KPI｜ブランド名単体TOP10率: 未取得' +
-    (kpi.reason ? '（' + kpi.reason + '）' : '（既存週次監視の取得待ち）') + '\n\n';
+    (kpi.reason ? '（' + kpi.reason + '）' : '（既存日次監視の取得待ち）') + '\n\n';
   const lowSample = kpi.lowSampleTop10.map(function (item) {
     return item.brand + '「' + item.query + '」' + item.impressions + '表示';
   }).join(' / ');
@@ -552,7 +622,13 @@ function buildBrandRankKpiSummary_() {
       kpi.nearTop10Count + ' / 21位以下: ' + kpi.lowerRankCount + ' / unknown: ' + kpi.unknownCount,
     '- TOP10のうち少量で暫定: ' + (lowSample || 'なし'),
     '- 重点ブランド（優先対応）: ' + (focusSummary || '今回の取得対象なし'),
-    '- 既存週次取得値: ' + kpi.windowStart + '〜' + kpi.windowEnd + ' / 最終取得 ' + kpi.checkedAt,
+    '- 既存日次取得値: ' + kpi.windowStart + '〜' + kpi.windowEnd + ' / 最終取得 ' + kpi.checkedAt,
+    '- ' + (kpi.freshnessNote || '本日分の保存値を参照'),
+    '- ' + (kpi.observationNote || '比較は同一検索語・同一ブランドページ。'),
+    (kpi.focusTrends || []).map(function (item) {
+      return '- ' + item.brand + '「' + item.query + '」\n  7日: ' + item.seven.text +
+        '\n  28日: ' + item.twentyEight.text;
+    }).join('\n'),
     '- 定義: ' + kpi.definition,
     '- 注意: ' + kpi.caveat + (kpi.gscRowsComplete ? '' : ' GSC取得上限到達または完全性未確認。'),
     '- カテゴリー掛け合わせは補助指標。SEO変更の効果は再クロール後の期間で比較する。',
@@ -571,9 +647,23 @@ function brandRankReplaceRows_(sheetName, headers, rows) {
 
 function brandRankAppendRows_(sheetName, headers, rows) {
   const sheet = brandRankEnsureSheet_(sheetName, headers);
+  const needed = sheet.getLastRow() + rows.length;
+  if (needed > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), needed - sheet.getMaxRows());
   if (rows.length) sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, headers.length).setValues(rows);
-  const excess = sheet.getLastRow() - 1001;
-  if (excess > 0) sheet.deleteRows(2, excess);
+  const dates = sheet.getLastRow() > 1 ? sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues() : [];
+  const excess = brandRankExpiredPrefix_(dates, new Date());
+  if (excess) sheet.deleteRows(2, excess);
+}
+
+function brandRankExpiredPrefix_(dates, now) {
+  const cutoff = now.getTime() - 120 * 24 * 60 * 60 * 1000;
+  let count = 0;
+  for (let i = 0; i < dates.length; i++) {
+    const time = new Date(dates[i][0]).getTime();
+    if (!isFinite(time) || time >= cutoff) break;
+    count++;
+  }
+  return count;
 }
 
 function brandRankAcquireLease_() {
@@ -727,13 +817,24 @@ function brandRankRun_(manual) {
 }
 
 function runBrandNameRankMonitor() {
-  return brandRankRun_(false);
+  return brandRankRunLogged_(false);
 }
 
 function runBrandNameRankMonitorNow() {
-  const result = brandRankRun_(true);
-  Logger.log(JSON.stringify(result));
-  return result;
+  return brandRankRunLogged_(true);
+}
+
+function brandRankRunLogged_(manual) {
+  const startedAt = new Date();
+  try {
+    const result = brandRankRun_(manual);
+    Logger.log(JSON.stringify(result));
+    logRun_(startedAt, KEA_BRAND_RANK_TRIGGER_HANDLER_, result.status, JSON.stringify(result));
+    return result;
+  } catch (error) {
+    logRun_(startedAt, KEA_BRAND_RANK_TRIGGER_HANDLER_, 'failed', String(error.message || error));
+    throw error;
+  }
 }
 
 function ensureBrandNameRankMonitorTrigger() {
@@ -741,6 +842,11 @@ function ensureBrandNameRankMonitorTrigger() {
     return trigger.getHandlerFunction() === KEA_BRAND_RANK_TRIGGER_HANDLER_;
   }).forEach(function (trigger) { ScriptApp.deleteTrigger(trigger); });
   ScriptApp.newTrigger(KEA_BRAND_RANK_TRIGGER_HANDLER_)
-    .timeBased().onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(8).create();
-  return { status: 'installed', handler: KEA_BRAND_RANK_TRIGGER_HANDLER_ };
+    .timeBased().atHour(6).nearMinute(0).everyDays(1).inTimezone(KEA_DEFAULTS.TIME_ZONE).create();
+  const result = { status: 'installed', handler: KEA_BRAND_RANK_TRIGGER_HANDLER_,
+    schedule: 'daily around 06:00 Asia/Tokyo', count: ScriptApp.getProjectTriggers().filter(function (trigger) {
+      return trigger.getHandlerFunction() === KEA_BRAND_RANK_TRIGGER_HANDLER_;
+    }).length };
+  Logger.log(JSON.stringify(result));
+  return result;
 }
