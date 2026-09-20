@@ -62,7 +62,7 @@ const KEA_BRAND_QUERY_REFERENCES_ = {
       "Agapantha Jewelry"
     ],
     "source": "https://www.agapantha.com/pages/faq",
-    "note": "公式事業表記 Agapantha Jewelry。法的法人格は断定しない"
+    "note": "公式事業表記 Agapantha Jewelry。海外の個人による運営（取引先確認）"
   },
   "BATONER": {
     "aliases": [
