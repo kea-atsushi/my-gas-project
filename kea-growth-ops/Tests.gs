@@ -1182,6 +1182,94 @@ function runKeaGrowthUnitTests() {
       return finding.level === '要対応' && finding.key === 'source-failure|shopify';
     }));
   }, results);
+  test_('low-signal zero-CV ads stay observation-only until action is justified', function () {
+    const shopify = {
+      available: true,
+      orders: [],
+      products: [],
+      summary: {
+        netSales: 0,
+        orderCount: 0,
+        estimatedCogs: 0,
+        cogsCoverage: 1,
+      },
+      collection: {
+        status: 'success',
+        fetchedAt: '2026-09-22T07:00:00+09:00',
+        apiResponse: 'HTTP成功 / 注文 0件',
+        failureStreak: 0,
+        previous: null,
+      },
+    };
+    const makeAds = function (cost) {
+      return {
+        available: true,
+        campaigns: [],
+        searchTerms: [],
+        summary: {
+          cost: cost,
+          conversions: 0,
+          roas: 0,
+          cpa: 0,
+          ctr: 0.038,
+          cpc: 49,
+        },
+        collection: {
+          status: 'success',
+          fetchedAt: '2026-09-22T07:00:00+09:00',
+          apiResponse: 'HTTP成功',
+          failureStreak: 0,
+          previous: null,
+        },
+      };
+    };
+    const availableEmpty = {
+      available: true,
+      summary: {},
+      rows: [],
+      products: [],
+      collection: { status: 'success' },
+    };
+    const buildAdFinding = function (cost, orderCount, shopifyAvailable) {
+      const currentShopify = Object.assign({}, shopify, {
+        available: shopifyAvailable !== false,
+        summary: Object.assign({}, shopify.summary, { orderCount: orderCount }),
+      });
+      const ads = makeAds(cost);
+      const snapshot = buildGrowthSnapshot_(
+        new Date('2026-09-22T00:00:00+09:00'),
+        currentShopify,
+        availableEmpty,
+        ads,
+        {
+          available: true,
+          summary: { approved: 629, disapproved: 0 },
+          products: [],
+          collection: { status: 'success' },
+        },
+        availableEmpty,
+      );
+      return buildDailyFindings_(
+        snapshot,
+        { shopify: currentShopify, ads: ads },
+        [],
+        {},
+      ).find(function (finding) {
+        return finding.key === 'ads-spend-zero-conversions';
+      });
+    };
+
+    const lowSpend = buildAdFinding(98, 0, true);
+    assertEqual_(lowSpend.level, '対応不要');
+    assertTrue_(lowSpend.title.indexOf('経過観察') >= 0);
+
+    const reviewSpend = buildAdFinding(1000, 0, true);
+    assertEqual_(reviewSpend.level, '要確認');
+
+    const trackingMismatch = buildAdFinding(98, 1, true);
+    assertEqual_(trackingMismatch.level, '要対応');
+  }, results);
+
   test_('malformed Shopify response is not accepted as zero orders', function () {
     const originalFetcher = fetchShopifyOrdersPage_;
     try {

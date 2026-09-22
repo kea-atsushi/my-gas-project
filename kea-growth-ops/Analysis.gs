@@ -473,24 +473,42 @@ function buildDailyFindings_(snapshot, data, recommendations, health) {
     data.ads.available && Number(data.ads.summary.cost || 0) > 0 &&
     Number(data.ads.summary.conversions || 0) <= 0
   ) {
+    const adCost = Number(data.ads.summary.cost || 0);
     const shopifyOrders = data.shopify.available
       ? Number(data.shopify.summary.orderCount || 0)
       : null;
+    const reviewLevel = shopifyOrders === null
+      ? '要確認'
+      : shopifyOrders > 0
+        ? '要対応'
+        : adCost >= 1000
+          ? '要確認'
+          : '対応不要';
     findings.push(
       operationalFinding_(
-        shopifyOrders > 0 ? '要対応' : '要確認',
+        reviewLevel,
         'Google Ads',
         'ads-spend-zero-conversions',
-        '広告費あり・購入CV 0',
+        reviewLevel === '対応不要'
+          ? '広告費あり・購入CV 0（経過観察）'
+          : '広告費あり・購入CV 0',
         shopifyOrders > 0
           ? 'Shopify注文があるのにGoogle Ads購入CVが0です。'
-          : '広告費が発生し、購入CVが0です。',
-        '広告費 ' + yen_(data.ads.summary.cost) +
+          : shopifyOrders === null
+            ? 'Shopify注文数を取得できないため、広告CV0の妥当性を判定できません。'
+            : adCost >= 1000
+              ? '広告費が1,000円以上発生し、購入CVが0です。'
+              : '広告費は少額で、Shopify注文も0件です。',
+        '広告費 ' + yen_(adCost) +
           ' / Google Ads CV 0 / Shopify注文 ' +
           (shopifyOrders === null ? '取得不可' : shopifyOrders + '件'),
         shopifyOrders > 0
           ? '購入コンバージョン計測を確認します。増額はしません。'
-          : '日次ダイジェストで推移を確認し、未検証の停止・増額はしません。',
+          : shopifyOrders === null
+            ? 'Shopify取得復旧後に再判定します。広告変更はしません。'
+            : adCost >= 1000
+              ? '検索語句と購入計測を確認します。未検証の停止・増額はしません。'
+              : '経過観察。日次メールは発生させず、費用または注文状況が変わった時に再判定します。',
       ),
     );
   }

@@ -119,6 +119,9 @@ function runDailyGrowthReport(force) {
         health,
       );
       const notificationFindings = dailyFindingNotificationDelta_(findings);
+      const notificationReport = notificationFindings.length
+        ? buildDecisionSummary_(notificationFindings)
+        : '';
       const report =
         buildBrandRankKpiSummary_() +
         buildDecisionSummary_(findings) + '\n\n' +
@@ -142,7 +145,7 @@ function runDailyGrowthReport(force) {
       const email = sendGrowthReport_(
         'daily',
         periodEnd,
-        report,
+        notificationReport || report,
         snapshot,
         notificationFindings,
       );
