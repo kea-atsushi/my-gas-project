@@ -523,7 +523,7 @@ function brandRankKpiFromRows_(rows) {
 }
 
 /** Compare the same query and collection, never independently chosen aliases. */
-function brandRankCompare_(current, previous, fresh) {
+function brandRankCompare_(current, previous, fresh, changedAt) {
   const metric = function (row) {
     const impressions = Number(row && row.collectionImpressions || 0);
     const position = Number(row && row.collectionPosition || 0);
@@ -547,7 +547,7 @@ function brandRankCompare_(current, previous, fresh) {
   const delta = a.position == null || b.position == null ? null : b.position - a.position;
   const dateText = function (value) { return value instanceof Date ? dateKey_(value) : String(value || '未取得'); };
   const start = current && dateText(current.windowStart);
-  const postChange = /^\d{4}-\d{2}-\d{2}$/.test(start || '') && start > '2026-09-20';
+  const postChange = /^\d{4}-\d{2}-\d{2}$/.test(start || '') && start > (changedAt || '2026-09-20');
   const text = !current || !previous ? '比較期間の取得待ち' :
     '順位 ' + rank(b.position) + '→' + rank(a.position) +
     (delta == null ? '' : '（改善幅 ' + signed(delta, 2) + '）') +
@@ -574,9 +574,11 @@ function brandRankFocusTrends_(kpi, queryRows, fresh) {
         byWindow[row.window] = row;
       }
     });
+    const plan = (kpi.weeklyPlan || []).filter(function (row) { return row.brand === item.brand; })[0];
+    const changedAt = plan && plan.focusStartedAt ? String(plan.focusStartedAt) : '';
     return { brand: item.brand, query: item.query, collectionUrl: item.collectionUrl,
-      seven: brandRankCompare_(byWindow.last_7d, byWindow.previous_7d, fresh),
-      twentyEight: brandRankCompare_(byWindow.last_28d, byWindow.previous_28d, fresh) };
+      seven: brandRankCompare_(byWindow.last_7d, byWindow.previous_7d, fresh, changedAt),
+      twentyEight: brandRankCompare_(byWindow.last_28d, byWindow.previous_28d, fresh, changedAt) };
   });
 }
 
