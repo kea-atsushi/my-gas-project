@@ -420,28 +420,28 @@ function sendGrowthReport_(cadence, periodEnd, report, snapshot, findings) {
     to: emails.join(','),
     subject: subject,
     body: report,
-    htmlBody: reportToHtml_(report, snapshot),
+    htmlBody: reportToHtml_(report, snapshot, cadence),
     name: 'Kea. Growth Ops',
   });
   return { status: 'sent', recipients: emails, findingCounts: counts };
 }
 
-function reportToHtml_(report, snapshot) {
+function reportToHtml_(report, snapshot, cadence) {
   const body = escapeHtml_(report).replace(/\n/g, '<br>');
-  const profit =
-    snapshot.contributionProfit === null
-      ? '原価未取得'
-      : yen_(snapshot.contributionProfit);
-  return [
-    '<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;color:#171717;line-height:1.65">',
-    '<h1 style="font-size:20px">Kea. Growth Ops</h1>',
+  const metrics = cadence === 'daily' ? '' : [
     '<table style="border-collapse:collapse;width:100%;max-width:680px">',
     metricCell_('売上', yen_(snapshot.shopifySales)),
     metricCell_('広告費', yen_(snapshot.adCost)),
     metricCell_('ROAS', decimal_(snapshot.roas)),
     metricCell_('CPA', yen_(snapshot.cpa)),
-    metricCell_('貢献利益', profit),
+    metricCell_('貢献利益', snapshot.contributionProfit === null
+      ? '原価未取得' : yen_(snapshot.contributionProfit)),
     '</table>',
+  ].join('');
+  return [
+    '<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;color:#171717;line-height:1.65">',
+    '<h1 style="font-size:20px">Kea. Growth Ops</h1>',
+    metrics,
     '<div style="margin-top:24px;white-space:normal">' + body + '</div>',
     '</div>',
   ].join('');
