@@ -1,126 +1,192 @@
 /**
- * Kea Growth Ops: current brand-name SEO cause/action register.
- *
- * This is an evidence register inside the existing Growth Ops dashboard. It
- * reads the existing BrandSEOBrandRank and BrandSEOTechnical tabs and does not
- * modify Shopify, Search Console, Merchant Center, or Google Ads.
+ * Weekly decisions in the existing action register. No Shopify writes or mail.
+ * Keep the original columns and historic rows; append one complete 16-brand week.
  */
 var KEA_BRAND_SEO_ACTION_SHEET_ = 'BrandSEOActionPlan';
+var KEA_BRAND_SEO_ACTION_HEADERS_ = [
+  'checkedAt', 'brand', 'priority', 'last28Impressions', 'last28Clicks',
+  'last28Ctr', 'collectionPosition', 'top10', 'productCount', 'technicalSEO',
+  'brandPageContent', 'internalLinks', 'oldEc301', 'externalStockist',
+  'searchCompetition', 'safeActionNow', 'humanFollowup',
+  'decisionWeek', 'query', 'weekStart', 'weekEnd', 'weekPosition',
+  'weekImpressions', 'weekClicks', 'weekCtr', 'weekTop10', 'rankImprovement',
+  'focusState', 'focusStartedAt', 'changesThisWeek', 'nextAction', 'reviewUntil'
+];
 
-function brandSeoActionStatic_(brand) {
-  var commonExternal = '公式Stockist／SHOP LIST／DEALERSでKea掲載と新ブランドURLを確認。検索で確認できない場合のみ掲載依頼（送信は人が実施）';
-  var rows = {
-    '77circa': { competition: '公式・大手EC・他セレクトショップとの競合。商品掲載12件だがブランド単体表示0', external: commonExternal },
-    'Agapantha Jewelry': { competition: 'ブランド名表記揺れと公式・ジュエリーECの競合。商品掲載4件、ブランド単体表示0', external: commonExternal },
-    'BATONER': { competition: '公式・大手EC・他セレクトショップと競合するがKeaコレクションはTOP10', external: 'BATONER公式StockistにKeaの店名・住所・電話掲載あり。新ブランドページへの直接リンク追加可否を確認' },
-    'blurhms': { competition: '公式・大手EC・他セレクトショップとの競合。商品掲載1件、ブランド単体表示0', external: commonExternal },
-    'Button Works': { competition: '英語一般語の検索意図が混在。11〜20位でTOP10直前', external: commonExternal },
-    'Chloé': { competition: '世界的公式・百貨店・大手ECが強い。Keaはアイウェア1件', external: commonExternal },
-    'COEL': { competition: '公式・大手EC・メディアが強い。商品掲載47件だがブランド単体表示0', external: commonExternal },
-    'kit・sch': { competition: '記号・表記揺れが大きく一般語も混在。商品掲載3件', external: commonExternal },
-    "LEVI'S": { competition: '公式・大手EC・メディアが非常に強い。501等の商品軸を補助KPIで維持', external: 'Levi公式店舗検索は存在。Kea掲載と新ブランドページへのリンクは未確認のため人手確認' },
-    'mikomori': { competition: '公式・大手EC・リゾートウェア文脈との競合。商品掲載8件', external: commonExternal },
-    'MONOEARTH': { competition: '公式・大手ECとの競合。商品掲載3件、ブランド単体表示0', external: commonExternal },
-    'Oblada': { competition: '公式、ELLE SHOP、Bshop等の大手・他セレクトショップが上位。11〜20位で表示31', external: commonExternal },
-    'SEA': { competition: '一般英単語・海外同名・ZOZO・メディアが混在し検索意図が強く曖昧', external: commonExternal },
-    'SINME': { competition: '公式・大手EC・他セレクトショップと競合するがKeaコレクションはTOP10', external: commonExternal },
-    'SUICOKE': { competition: '公式・大手EC・スニーカー媒体が強い。商品掲載1件', external: commonExternal },
-    'Velnica': { competition: '公式2ドメインと同名・無関係検索結果が混在。旧EC評価移行も未完了', external: commonExternal }
-  };
-  return rows[brand] || { competition: '公式・大手EC・他セレクトショップとの競合を継続確認', external: commonExternal };
+function brandSeoActionPriority_(top10, position, impressions) {
+  if (top10) return '維持（TOP10）';
+  if (impressions > 0 && position > 10 && position <= 20) return 'A（11〜20位）';
+  if (impressions > 0 && position > 20 && position <= 40) return 'B（21〜40位）';
+  return 'C（40位超・未観測）';
 }
 
-function brandSeoActionLegacy_(brand) {
-  var rows = {
-    'Oblada': '旧category_id=526 → /collections/oblada の1対1 301を確認済み',
-    'SINME': '旧category_id=273 → /collections/sinme の1対1 301を確認済み',
-    'SEA': '旧category_id=21 → /collections/sea の1対1 301を確認済み',
-    'Velnica': '旧category_id=23 が新ドメインの同じPHPパスへ転送され400。旧wwwサーバ側の1対1 301が必要',
-  };
-  return rows[brand] || 'Search Console過去3か月で対応する旧ECランディングを特定できず。旧URL一覧／被リンクが判明した時点で1対1確認';
+function brandSeoPlanRows_(sheet) {
+  if (!sheet) return [];
+  var values = sheet.getDataRange().getValues();
+  var headers = values.shift() || [];
+  return values.map(function (row) { return rowObject_(headers, row); });
 }
 
-function brandSeoActionPriority_(top10, position, impressions, productCount) {
-  if (top10) return '監視（TOP10）';
-  if (impressions > 0 && position >= 11 && position <= 20) return 'P1（TOP10直前）';
-  if (impressions > 0 || productCount >= 10) return 'P2';
-  return 'P3（表示0・少数商品）';
+function brandSeoDecisionWeek_(now) {
+  var date = new Date(dateKey_(now) + 'T12:00:00Z');
+  date.setUTCDate(date.getUTCDate() - (date.getUTCDay() + 6) % 7);
+  return date.toISOString().slice(0, 10);
+}
+
+function readBrandSeoWeeklyPlan_() {
+  var rows = brandSeoPlanRows_(getDashboardSpreadsheet_().getSheetByName(KEA_BRAND_SEO_ACTION_SHEET_))
+    .filter(function (row) { return row.decisionWeek; });
+  var latest = rows.reduce(function (value, row) {
+    return Math.max(value, new Date(row.checkedAt).getTime() || 0);
+  }, 0);
+  return rows.filter(function (row) { return new Date(row.checkedAt).getTime() === latest; });
+}
+
+function buildBrandSeoWeeklyPlan_(rankRows, queryRows, techRows, history, now) {
+  var kpi = brandRankKpiFromRows_(rankRows);
+  var stamp = new Date(kpi.checkedAt).getTime();
+  if (!kpi.available || !kpi.gscRowsComplete || kpi.brandCount !== 16 ||
+      now.getTime() - stamp > 48 * 3600000 || stamp > now.getTime()) {
+    throw new Error('Fresh complete 16-brand observations required; previous decisions preserved');
+  }
+  var current = rankRows.filter(function (row) {
+    return row.window === 'last_28d' && new Date(row.checkedAt).getTime() === stamp;
+  });
+  var queryCurrent = queryRows.filter(function (row) {
+    return row.axis === 'ブランド名単体' && new Date(row.checkedAt).getTime() === stamp;
+  });
+  var week = brandSeoDecisionWeek_(now);
+  var day = dateKey_(now);
+  var previous = {};
+  history.filter(function (row) { return row.decisionWeek; }).forEach(function (row) {
+    if (!previous[row.brand] || new Date(row.checkedAt) > new Date(previous[row.brand].checkedAt)) previous[row.brand] = row;
+  });
+  var items = current.map(function (rank) {
+    var brand = rank.brand, prior = previous[brand] || {};
+    var impressions = Number(rank.collectionImpressions || 0);
+    var position = impressions > 0 && Number(rank.collectionPosition) > 0 ? Number(rank.collectionPosition) : null;
+    var top10 = position !== null && position <= 10;
+    var query = prior.focusState === '集中' ? prior.query : rank.brandQuery;
+    var matching = queryCurrent.filter(function (row) {
+      return row.brand === brand && row.collectionUrl === rank.collectionUrl &&
+        brandRankNormalizeQuery_(row.query) === brandRankNormalizeQuery_(query);
+    });
+    var a = matching.filter(function (row) { return row.window === 'last_7d'; })[0];
+    var b = matching.filter(function (row) { return row.window === 'previous_7d'; })[0];
+    if (!a || !b || !(a.gscRowsComplete === true || a.gscRowsComplete === 'TRUE') ||
+        !(b.gscRowsComplete === true || b.gscRowsComplete === 'TRUE')) {
+      throw new Error('Complete weekly query rows required for ' + brand);
+    }
+    var comparison = brandRankCompare_(a, b, true);
+    var tech = techRows.filter(function (row) { return row.brand === brand; })[0] || {};
+    var techFresh = now.getTime() - new Date(tech.checkedAt).getTime() <= 48 * 3600000;
+    var techOk = techFresh && tech.indexed === true && tech.canonicalMatches === true &&
+      tech.indexingState === 'INDEXING_ALLOWED' && tech.robotsTxtState === 'ALLOWED' &&
+      Number(tech.finalHttpStatus || tech.httpStatus) === 200;
+    var start = prior.focusState === '集中' ? String(prior.focusStartedAt || day) : day;
+    var age = Math.floor((now.getTime() - new Date(start + 'T00:00:00+09:00').getTime()) / 86400000);
+    var baseline = history.filter(function (row) {
+      return row.brand === brand && row.focusState === '集中' &&
+        String(row.focusStartedAt) === start && row.query === query;
+    }).sort(function (x, y) { return new Date(x.checkedAt) - new Date(y.checkedAt); })[0];
+    var improved = baseline && Number(baseline.weekImpressions) >= 10 && comparison.current.impressions >= 10 &&
+      baseline.weekPosition !== '' && comparison.current.position !== null &&
+      Number(baseline.weekPosition) - comparison.current.position >= 1;
+    var reviewUntil = String(prior.reviewUntil || '');
+    var reassess = !top10 && prior.focusState === '集中' && age >= 21 && !improved;
+    if (reassess) reviewUntil = dateKey_(new Date(now.getTime() + 14 * 86400000));
+    var cooling = !top10 && reviewUntil > day;
+    return { brand: brand, rank: rank, prior: prior, query: query, a: a, b: b, comparison: comparison,
+      position: position, top10: top10, techOk: techOk, age: age, start: start,
+      priority: brandSeoActionPriority_(top10, position, impressions),
+      cooling: cooling, reviewUntil: cooling ? reviewUntil : '' };
+  });
+  var candidates = items.filter(function (item) { return !item.top10 && !item.cooling; });
+  candidates.sort(function (a, b) {
+    var group = function (item) {
+      if (!item.techOk) return 0;
+      return item.priority[0] === 'A' ? 1 : item.priority[0] === 'B' ? 2 : 3;
+    };
+    var highCompetition = function (item) { return ['LEVI\'S', 'Chloé', 'SUICOKE'].indexOf(item.brand) >= 0 ? 1 : 0; };
+    return group(a) - group(b) || highCompetition(a) - highCompetition(b) ||
+      (group(a) < 3 ? (a.position || 999) - (b.position || 999) :
+        Number(b.rank.productCount || 0) - Number(a.rank.productCount || 0)) ||
+      String(a.brand).localeCompare(String(b.brand));
+  });
+  var focus = candidates.slice(0, 5).map(function (item) { return item.brand; });
+  return items.map(function (item) {
+    var rank = item.rank, prior = item.prior, cmp = item.comparison;
+    var state = item.top10 ? '維持' : item.cooling ? '再評価' : focus.indexOf(item.brand) >= 0 ? '集中' : '待機';
+    var next = state === '維持' ? '成功箇所を維持。週次でTOP10と表示数を確認' :
+      state === '再評価' ? '21日以上改善を確認できず。同じ修正を停止し、競合・検索意図・本文・リンク・canonical・index・外部評価を再評価。観測不足は効果なしと断定しない' :
+      state === '集中' && !item.techOk ? '技術状態を最優先で確認し、対象URLの不具合だけ修正' :
+      state === '集中' && item.age >= 14 ? '2週間経過。競合・検索意図・再クロールを再評価し、同じ修正を繰り返さない' :
+      state === '集中' ? '再クロール後の同一語・同一URLの週次推移を確認。未観測は需要ゼロと判断しない' :
+      '集中枠が空いた時にA→B→Cの順で再選定';
+    var initial = day === '2026-09-24' && KEA_BRAND_RANK_FOCUS_BRANDS_.indexOf(item.brand) >= 0;
+    var changed = initial ? 'HOME本文からブランドへリンク追加' +
+      (['Button Works', 'COEL', '77circa'].indexOf(item.brand) >= 0 ? '。title・H1・descriptionに公式日本語名を補完' : '') :
+      '今週の新たなSEO変更は未記録（自動判定のみ）';
+    return [
+      now, item.brand, item.priority, Number(rank.collectionImpressions || 0),
+      Number(rank.collectionClicks || 0), Number(rank.collectionCtr || 0), item.position === null ? '' : item.position,
+      item.top10, Number(rank.productCount || 0),
+      item.techOk ? 'PASS：GSC index・canonical・robots・HTTP（保存済み最新値）' : '要確認：BrandSEOTechnical参照',
+      prior.brandPageContent || '2026-09-24確認：既存紹介本文を保持。商品の変更なし',
+      initial ? 'HOME→ブランドを追加。BRAND一覧・CATEGORY・商品詳細→ブランドを維持' : prior.internalLinks || '既存導線を維持',
+      prior.oldEc301 || 'BrandSEOTechnicalの旧URL診断を参照',
+      prior.externalStockist || '2026-09-24調査記録参照。外部連絡は未実施',
+      prior.searchCompetition || (item.priority[0] === 'C' ? '単体検索は未観測または低順位。需要・難易度は未確定' : '観測順位に基づき優先'),
+      next, '外部サイトへの連絡は自動送信しない',
+      week, item.query, item.a ? item.a.windowStart : '', item.a ? item.a.windowEnd : '',
+      cmp.current.position === null ? '' : cmp.current.position, cmp.current.impressions,
+      cmp.current.clicks, cmp.current.ctr, cmp.current.position === null ? '未観測' : cmp.current.position <= 10,
+      cmp.status === '比較不可' || cmp.rankImprovement === null ? '' : cmp.rankImprovement,
+      state, state === '集中' ? item.start : '', changed, next, item.reviewUntil
+    ];
+  });
 }
 
 function writeBrandSeoActionPlanNow() {
-  var spreadsheet = getDashboardSpreadsheet_();
-  var rankSheet = spreadsheet.getSheetByName(KEA_BRAND_RANK_SUMMARY_SHEET_);
-  var techSheet = spreadsheet.getSheetByName(KEA_BRAND_RANK_TECH_SHEET_);
-  if (!rankSheet || !techSheet) throw new Error('Brand SEO monitoring sheets are missing');
-
-  var rankValues = rankSheet.getDataRange().getValues();
-  var rankHeaders = rankValues.shift();
-  var ri = {};
-  rankHeaders.forEach(function (value, index) { ri[String(value)] = index; });
-  var last28 = rankValues.filter(function (row) { return row[ri.window] === 'last_28d'; });
-  var latest = last28.reduce(function (value, row) {
-    var candidate = String(row[ri.checkedAt] || '');
-    return candidate > value ? candidate : value;
-  }, '');
-  last28 = last28.filter(function (row) { return String(row[ri.checkedAt] || '') === latest; });
-
-  var techValues = techSheet.getDataRange().getValues();
-  var techHeaders = techValues.shift();
-  var ti = {};
-  techHeaders.forEach(function (value, index) { ti[String(value)] = index; });
-  var techByBrand = {};
-  techValues.forEach(function (row) { techByBrand[String(row[ti.brand] || '')] = row; });
-
-  var headers = [
-    'checkedAt', 'brand', 'priority', 'last28Impressions', 'last28Clicks',
-    'last28Ctr', 'collectionPosition', 'top10', 'productCount', 'technicalSEO',
-    'brandPageContent', 'internalLinks', 'oldEc301', 'externalStockist',
-    'searchCompetition', 'safeActionNow', 'humanFollowup'
-  ];
-  var rows = last28.map(function (rank) {
-    var brand = String(rank[ri.brand] || '');
-    var tech = techByBrand[brand] || [];
-    var position = Number(rank[ri.collectionPosition] || 0);
-    var impressions = Number(rank[ri.collectionImpressions] || 0);
-    var productCount = Number(rank[ri.productCount] || 0);
-    var top10 = rank[ri.top10Collection] === true;
-    var technical = tech.length && tech[ti.indexed] === true && tech[ti.canonicalMatches] === true &&
-      String(tech[ti.indexingState] || '') === 'INDEXING_ALLOWED' &&
-      String(tech[ti.robotsTxtState] || '') === 'ALLOWED'
-      ? 'PASS：index、self-canonical、sitemap、robots、noindex、HTTPを確認'
-      : '要確認：BrandSEOTechnicalの状態を再点検';
-    var content = 'H1＝ブランド名、title／description／説明文あり。商品掲載' + productCount + '件。';
-    if (productCount <= 3) content += '少数商品のため関連性・更新頻度が弱い。';
-    else if (productCount <= 9) content += '商品数は限定的。';
-    else content += '実商品との関連性あり。';
-    var legacy = brandSeoActionLegacy_(brand);
-    var extra = brandSeoActionStatic_(brand);
-    var action = top10
-      ? '2026-09-20のtitle／H1を据え置き、再クロール後の28日推移を週次監視'
-      : 'title／H1は据え置き。BRAND一覧と商品ページからのブランドリンクを維持し週次監視';
-    if (brand === 'Velnica') action = '旧wwwサーバ側でquery付き旧URLを /collections/velnica へ1対1 301（Shopifyリダイレクトでは修正不可）';
-    return [
-      new Date(), brand, brandSeoActionPriority_(top10, position, impressions, productCount),
-      impressions, Number(rank[ri.collectionClicks] || 0), Number(rank[ri.collectionCtr] || 0),
-      position, top10, productCount, technical, content,
-      'BRAND一覧→ブランドページと商品ページ→ブランドページを確認。孤立なし。ホーム直リンクは掲載商品により変動',
-      legacy, extra.external, extra.competition, action,
-      extra.external + '。外部サイトへの連絡は未実施'
-    ];
-  }).sort(function (a, b) {
-    var order = { 'P1（TOP10直前）': 1, 'P2': 2, 'P3（表示0・少数商品）': 3, '監視（TOP10）': 4 };
-    return (order[a[2]] || 9) - (order[b[2]] || 9) || b[3] - a[3] || String(a[1]).localeCompare(String(b[1]));
+  return withScriptLock_('writeBrandSeoActionPlanNow', function () {
+    var spreadsheet = getDashboardSpreadsheet_();
+    var sheet = spreadsheet.getSheetByName(KEA_BRAND_SEO_ACTION_SHEET_);
+    if (!sheet) throw new Error('Existing BrandSEOActionPlan is required');
+    var history = brandSeoPlanRows_(sheet);
+    var now = new Date(), week = brandSeoDecisionWeek_(now);
+    var written = history.filter(function (row) { return String(row.decisionWeek) === week; });
+    if (written.length === 16 && new Set(written.map(function (row) { return row.brand; })).size === 16) {
+      return { status: 'already_written', decisionWeek: week, brandCount: 16 };
+    }
+    if (written.length) throw new Error('Partial weekly plan exists; do not append duplicate decisions');
+    var headers = KEA_BRAND_SEO_ACTION_HEADERS_;
+    var existing = sheet.getRange(1, 1, 1, 17).getValues()[0];
+    if (existing.join('|') !== headers.slice(0, 17).join('|')) throw new Error('Action register header conflict');
+    var rows = buildBrandSeoWeeklyPlan_(
+      brandSeoPlanRows_(spreadsheet.getSheetByName(KEA_BRAND_RANK_SUMMARY_SHEET_)),
+      brandSeoPlanRows_(spreadsheet.getSheetByName(KEA_BRAND_RANK_QUERY_SHEET_)),
+      brandSeoPlanRows_(spreadsheet.getSheetByName(KEA_BRAND_RANK_TECH_SHEET_)), history, now);
+    if (sheet.getMaxColumns() < headers.length) sheet.insertColumnsAfter(sheet.getMaxColumns(), headers.length - sheet.getMaxColumns());
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    var start = sheet.getLastRow() + 1;
+    if (sheet.getMaxRows() < start + rows.length - 1) sheet.insertRowsAfter(sheet.getMaxRows(), start + rows.length - 1 - sheet.getMaxRows());
+    [18, 29, 32].forEach(function (column) { sheet.getRange(start, column, rows.length, 1).setNumberFormat('@'); });
+    sheet.getRange(start, 1, rows.length, headers.length).setValues(rows);
+    SpreadsheetApp.flush();
+    var readback = sheet.getRange(start, 1, rows.length, headers.length).getValues();
+    if (readback.some(function (row, index) { return row[1] !== rows[index][1] || row[27] !== rows[index][27]; })) throw new Error('Weekly plan readback mismatch');
+    var filter = sheet.getFilter();
+    if (filter) filter.remove();
+    sheet.getRange(1, 1, sheet.getLastRow(), headers.length).createFilter();
+    sheet.setFrozenRows(1);
+    sheet.getRange(start, 1, rows.length, 1).setNumberFormat('yyyy-mm-dd hh:mm');
+    sheet.getRange(start, 10, rows.length, headers.length - 9).setWrap(true).setVerticalAlignment('top');
+    sheet.setColumnWidths(18, 12, 120);
+    sheet.setColumnWidths(30, 2, 340);
+    var result = { status: 'written', decisionWeek: week, brandCount: rows.length,
+      focus: rows.filter(function (row) { return row[27] === '集中'; }).map(function (row) { return row[1]; }),
+      top10Count: rows.filter(function (row) { return row[7]; }).length };
+    Logger.log(JSON.stringify(result));
+    return result;
   });
-
-  var sheet = spreadsheet.getSheetByName(KEA_BRAND_SEO_ACTION_SHEET_) || spreadsheet.insertSheet(KEA_BRAND_SEO_ACTION_SHEET_);
-  sheet.clear();
-  sheet.getRange(1, 1, 1, headers.length).setValues([headers])
-    .setBackground('#eeeeee').setFontColor('#111111').setFontWeight('bold');
-  if (rows.length) sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
-  sheet.setFrozenRows(1);
-  sheet.getRange(1, 1, Math.max(1, rows.length + 1), headers.length).createFilter();
-  sheet.autoResizeColumns(1, 9);
-  sheet.setColumnWidths(10, 8, 320);
-  sheet.getRange(2, 10, Math.max(1, rows.length), 8).setWrap(true).setVerticalAlignment('top');
-  return { status: 'written', brandCount: rows.length, checkedAt: latest, sheet: KEA_BRAND_SEO_ACTION_SHEET_ };
 }

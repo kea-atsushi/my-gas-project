@@ -10,8 +10,9 @@ const KEA_BRAND_RANK_QUERY_SHEET_ = 'BrandSEOQueries';
 const KEA_BRAND_RANK_TECH_SHEET_ = 'BrandSEOTechnical';
 const KEA_BRAND_RANK_LEASE_KEY_ = 'KEA_BRAND_RANK_MONITOR_LEASE_V1';
 const KEA_BRAND_RANK_TRIGGER_HANDLER_ = 'runBrandNameRankMonitor';
-// Owner-selected priorities. All current brands remain in the main KPI.
-const KEA_BRAND_RANK_FOCUS_BRANDS_ = ['Oblada', 'SEA', 'BATONER', "LEVI'S", 'SINME'];
+// Fixed owner-approved cohort: catalog changes must not move the 8/16 goalpost.
+const KEA_BRAND_RANK_TARGET_BRANDS_ = ['77circa', 'Agapantha Jewelry', 'BATONER', 'blurhms', 'Button Works', 'Chloé', 'COEL', 'kit・sch', "LEVI'S", 'mikomori', 'MONOEARTH', 'Oblada', 'SEA', 'SINME', 'SUICOKE', 'Velnica'];
+const KEA_BRAND_RANK_FOCUS_BRANDS_ = ['Button Works', 'Oblada', 'SEA', 'COEL', '77circa'];
 
 const KEA_BRAND_RANK_SUMMARY_HEADERS_ = [
   'checkedAt', 'window', 'windowStart', 'windowEnd', 'brand', 'english',
@@ -476,10 +477,8 @@ function brandRankKpiFromRows_(rows) {
   });
   const byBrand = {};
   current.forEach(function (row) { byBrand[row.brand] = row; });
-  // The latest catalog-backed run defines active brands, not the alias reference.
-  const brands = KEA_BRAND_RANK_FOCUS_BRANDS_.filter(function (brand) {
-    return Object.prototype.hasOwnProperty.call(byBrand, brand);
-  }).concat(Object.keys(byBrand).filter(function (brand) {
+  // Preserve the approved cohort even when stock/catalog availability changes.
+  const brands = KEA_BRAND_RANK_FOCUS_BRANDS_.concat(KEA_BRAND_RANK_TARGET_BRANDS_.filter(function (brand) {
     return KEA_BRAND_RANK_FOCUS_BRANDS_.indexOf(brand) < 0;
   }));
   const items = brands.map(function (brand) {
@@ -515,7 +514,7 @@ function brandRankKpiFromRows_(rows) {
     lowSampleTop10: items.filter(function (item) { return item.status === 'TOP10' && item.lowSample; }),
     gscRowsComplete: current.length > 0 && current.every(function (row) {
       return row.gscRowsComplete === true || row.gscRowsComplete === 'TRUE';
-    }),
+    }) && KEA_BRAND_RANK_TARGET_BRANDS_.every(function (brand) { return !!byBrand[brand]; }),
     definition: '英字・日本語等の単体表記のうち、対象ブランドコレクションの平均順位が最良の表記（同順位は表示数順）を採用。商品・旧URLの順位は成功に含めない。',
     caveat: 'GSC無観測はunknownで、TOP10外や表示ゼロとは断定しない。1〜2表示は暫定。平均順位は実際の全検索での固定順位ではない。各表記はBrandSEOQueriesを参照。',
     brands: items,
@@ -596,6 +595,14 @@ function readBrandRankKpi_() {
     const querySheet = getDashboardSpreadsheet_().getSheetByName(KEA_BRAND_RANK_QUERY_SHEET_);
     const queryValues = querySheet ? querySheet.getDataRange().getValues() : [];
     const queryHeaders = queryValues.shift() || [];
+    const plan = readBrandSeoWeeklyPlan_();
+    if (plan.length === 16) {
+      kpi.weeklyPlan = plan;
+      kpi.brands.forEach(function (item) {
+        item.focus = plan.some(function (row) { return row.brand === item.brand && row.focusState === '集中'; });
+      });
+      kpi.focusBrands = kpi.brands.filter(function (item) { return item.focus; });
+    }
     kpi.focusTrends = brandRankFocusTrends_(kpi, queryValues.map(function (row) {
       return rowObject_(queryHeaders, row);
     }), fresh);
@@ -618,11 +625,15 @@ function buildBrandRankKpiSummary_() {
   }).join(' / ');
   return [
     'SEO主要KPI｜ブランド名単体でブランドページTOP10',
+    '- 目標8/16：2026-11-19までに到達を狙い、2026-12-17までに安定。毎週月曜に集中／維持／再評価を判定。',
     '- ' + kpi.top10Count + '/' + kpi.brandCount + 'ブランド（' +
       (kpi.top10Rate * 100).toFixed(1) + '%、全対象が分母） / 11〜20位: ' +
       kpi.nearTop10Count + ' / 21位以下: ' + kpi.lowerRankCount + ' / unknown: ' + kpi.unknownCount,
     '- TOP10のうち少量で暫定: ' + (lowSample || 'なし'),
     '- 重点ブランド（優先対応）: ' + (focusSummary || '今回の取得対象なし'),
+    (kpi.weeklyPlan || []).filter(function (row) { return row.focusState === '集中' || row.focusState === '再評価'; }).map(function (row) {
+      return '- ' + row.brand + '（' + row.focusState + '）: ' + row.nextAction;
+    }).join('\n'),
     '- 既存日次取得値: ' + kpi.windowStart + '〜' + kpi.windowEnd + ' / 最終取得 ' + kpi.checkedAt,
     '- ' + (kpi.freshnessNote || '本日分の保存値を参照'),
     '- ' + (kpi.observationNote || '比較は同一検索語・同一ブランドページ。'),
@@ -729,7 +740,11 @@ function brandRankRun_(manual) {
     const config = keaConfig_();
     const catalog = collectShopifyCatalog_(config);
     if (!catalog.available) throw new Error(catalog.reason || 'Shopify catalog unavailable');
-    const vendorRows = brandSeoActiveVendorRows_(catalog.products);
+    const activeVendors = brandSeoActiveVendorRows_(catalog.products);
+    const vendorRows = KEA_BRAND_RANK_TARGET_BRANDS_.map(function (brand) {
+      return activeVendors.filter(function (row) { return row.vendor === brand; })[0] ||
+        { vendor: brand, productCount: 0, productHandles: [] };
+    });
     const inStockByVendor = {};
     (catalog.products || []).forEach(function (product) {
       if (product.status === 'ACTIVE' && product.publishedAt && product.onlineStoreUrl &&
@@ -829,6 +844,8 @@ function brandRankRunLogged_(manual) {
   const startedAt = new Date();
   try {
     const result = brandRankRun_(manual);
+    // Reuse the daily collector; retry a missed Monday on the next fresh run.
+    if (result.status === 'passed') result.weeklyPlan = writeBrandSeoActionPlanNow();
     Logger.log(JSON.stringify(result));
     logRun_(startedAt, KEA_BRAND_RANK_TRIGGER_HANDLER_, result.status, JSON.stringify(result));
     return result;

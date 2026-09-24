@@ -1250,7 +1250,7 @@ kpiRows.push({ ...kpiRows[0], brand: 'Velnica', brandQueryPosition: 1,
   inStockProductCount: '' });
 const kpi = brandContext.brandRankKpiFromRows_(kpiRows);
 assert.equal(kpi.brandCount, 16);
-assert.deepEqual(Array.from(kpi.focusBrands, item => item.brand), ['Oblada', 'SEA', 'BATONER', "LEVI'S", 'SINME']);
+assert.deepEqual(Array.from(kpi.focusBrands, item => item.brand), ['Button Works', 'Oblada', 'SEA', 'COEL', '77circa']);
 assert.deepEqual(Array.from(kpi.brands.slice(0, 5), item => item.brand), Array.from(kpi.focusBrands, item => item.brand));
 assert.equal(kpi.top10Count, 3);
 assert.equal(kpi.top10Rate, 3 / 16);
@@ -1274,7 +1274,7 @@ const trendRows = [
   { ...trendBase, window: 'previous_7d', collectionUrl: 'https://wrong.test/', collectionPosition: 1 },
   { ...trendBase, window: 'previous_7d', checkedAt: '2026-09-01', collectionPosition: 1 },
 ];
-const trend = brandContext.brandRankFocusTrends_(kpi, trendRows, true).find(row => row.brand === 'SINME');
+const trend = brandContext.brandRankFocusTrends_({ ...kpi, focusBrands: kpi.brands.filter(row => row.brand === 'SINME') }, trendRows, true).find(row => row.brand === 'SINME');
 assert.equal(trend.seven.rankImprovement, 4, 'do not compare another alias, page, or collection run');
 assert.equal(trend.seven.status, '改善傾向');
 assert.equal(trend.seven.postChange, true);
@@ -1296,13 +1296,9 @@ const changedCatalogRows = [
     collectionPosition: 0, collectionImpressions: 0 },
 ];
 const changedCatalogKpi = brandContext.brandRankKpiFromRows_([...kpiRows, ...changedCatalogRows]);
-assert.equal(changedCatalogKpi.brandCount, 2, 'retired brands must leave the latest denominator');
-assert.equal(changedCatalogKpi.focusBrands.length, 1, 'focus selection must not reintroduce retired brands');
-assert.equal(changedCatalogKpi.top10Rate, 1 / 2);
-assert.equal(changedCatalogKpi.unknownCount, 1);
-assert.equal(changedCatalogKpi.brands.some(row => row.brand === 'BATONER'), false);
-assert.equal(changedCatalogKpi.brands.some(row => row.brand === 'New Active Brand'), true,
-  'a new active brand must be counted without editing alias references');
+assert.equal(changedCatalogKpi.brandCount, 16, 'the approved cohort is fixed');
+assert.equal(changedCatalogKpi.gscRowsComplete, false, 'missing approved brands invalidate decisions');
+assert.equal(changedCatalogKpi.brands.some(row => row.brand === 'New Active Brand'), false);
 
 // Extending the summary must preserve the previous 24-column observation history.
 const summaryHeaders = vm.runInContext('KEA_BRAND_RANK_SUMMARY_HEADERS_', brandContext);
@@ -1349,11 +1345,12 @@ brandContext.brandRankAppendRows_ = (_name, headers, rows) => {
 };
 brandContext.brandRankRun_(true);
 assert.equal(rankFetches, 6);
-assert.equal(appendedSummary.length, 12);
+assert.equal(appendedSummary.length, 96);
 assert.ok(appendedSummary.every(row => row.length === 25 && !row[23].includes('9/20')));
 assert.ok(appendedSummary.filter(row => row[4] === 'SINME').every(row => row[24] === 1));
 assert.ok(appendedSummary.filter(row => row[4] === 'BATONER').every(row => row[24] === 0));
 brandContext.rowObject_ = context.rowObject_;
+brandContext.readBrandSeoWeeklyPlan_ = () => [];
 brandContext.getDashboardSpreadsheet_ = () => ({ getSheetByName: () => ({
   getDataRange: () => ({ getValues: () => [summaryHeaders, ...appendedSummary] }),
 }) });
@@ -1364,7 +1361,7 @@ kpi.focusTrends = [trend];
 const kpiReport = brandContext.buildBrandRankKpiSummary_();
 assert.match(kpiReport, /3\/16ブランド（18.8%/);
 assert.match(kpiReport, /unknown: 10/);
-assert.match(kpiReport, /重点ブランド（優先対応）: Oblada:.*SEA:.*BATONER:.*LEVI'S: 未観測.*SINME:/);
+assert.match(kpiReport, /重点ブランド（優先対応）: Button Works:.*Oblada:.*SEA:.*COEL: 未観測.*77circa:/);
 assert.match(kpiReport, /2026-10-05/);
 assert.doesNotMatch(kpiReport, /9\/20.*基準値/);
 assert.match(kpiReport, /1〜2表示は暫定/);
@@ -1372,6 +1369,48 @@ assert.match(kpiReport, /対象ブランドコレクション/);
 assert.match(kpiReport, /7日: 順位 12.00→8.00/);
 brandContext.readBrandRankKpi_ = () => ({ available: false, reason: 'read failed' });
 assert.match(brandContext.buildBrandRankKpiSummary_(), /未取得.*read failed/);
+
+// Weekly decisions preserve the fixed denominator, missing observations and rotation.
+new vm.Script(fs.readFileSync(path.join(root, "BrandSeoActionPlan.gs"), "utf8")).runInContext(brandContext);
+const planNow = new Date('2026-09-24T09:00:00Z');
+const planBrands = Array.from(vm.runInContext('KEA_BRAND_RANK_TARGET_BRANDS_', brandContext));
+const planRanks = planBrands.map(brand => ({ checkedAt: planNow.toISOString(), window: 'last_28d', brand,
+  brandQuery: brand, collectionUrl: 'https://example.test/' + brand,
+  collectionImpressions: ['Button Works', 'Oblada', 'SEA', 'SINME', 'BATONER', 'Agapantha Jewelry'].includes(brand) ? 30 : 0,
+  collectionPosition: ({'Button Works':11.5,Oblada:14.7,SEA:32.75,SINME:8,BATONER:1,'Agapantha Jewelry':9.5})[brand] || 0,
+  productCount: ({ COEL:47,'77circa':12, mikomori:8 })[brand] || 1, gscRowsComplete: true }));
+const planQueries = planRanks.flatMap(row => ['last_7d','previous_7d'].map(window => ({ ...row, window,
+  axis:'ブランド名単体', query:row.brand, windowStart:'2026-09-15', windowEnd:'2026-09-21' })));
+const planTech = planRanks.map(row => ({...row,indexed:true,canonicalMatches:true,
+  indexingState:'INDEXING_ALLOWED', robotsTxtState:'ALLOWED', httpStatus:200}));
+const planHeaders = brandContext.KEA_BRAND_SEO_ACTION_HEADERS_;
+const toObjects = rows => rows.map(row => Object.fromEntries(planHeaders.map((h,i) => [h,row[i]])));
+const plan = toObjects(brandContext.buildBrandSeoWeeklyPlan_(planRanks,planQueries,planTech,[],planNow));
+assert.deepEqual(plan.filter(row=>row.focusState==='集中').map(row=>row.brand).sort(), ['77circa','Button Works','COEL','Oblada','SEA']);
+assert.equal(plan.find(row=>row.brand==='COEL').weekPosition,'');
+assert.equal(plan.find(row=>row.brand==='COEL').weekTop10,'未観測');
+assert.equal(plan.find(row=>row.brand==='SINME').focusState,'維持');
+assert.match(brandContext.brandSeoActionPriority_(false,10.5,20),/^A/);
+assert.throws(()=>brandContext.buildBrandSeoWeeklyPlan_(planRanks,planQueries.slice(1),planTech,[],planNow),/Complete weekly/);
+assert.throws(()=>brandContext.buildBrandSeoWeeklyPlan_(planRanks,planQueries,planTech,[],new Date('2026-09-28')),/Fresh complete/);
+const rotatedNow = new Date('2026-10-19T09:00:00Z');
+const atRotated = rows => rows.map(row=>({...row,checkedAt:rotatedNow.toISOString()}));
+const rotated = toObjects(brandContext.buildBrandSeoWeeklyPlan_(atRotated(planRanks),atRotated(planQueries),atRotated(planTech),plan,rotatedNow));
+assert.equal(rotated.find(row=>row.brand==='Button Works').focusState,'再評価');
+assert.ok(rotated.some(row=>row.brand==='mikomori' && row.focusState==='集中'));
+const nextNow = new Date('2026-10-26T09:00:00Z');
+const nextStamp = rows => rows.map(row=>({...row,checkedAt:nextNow.toISOString()}));
+const stillCooling = toObjects(brandContext.buildBrandSeoWeeklyPlan_(nextStamp(planRanks),nextStamp(planQueries),nextStamp(planTech),[...plan,...rotated],nextNow));
+assert.equal(stillCooling.find(row=>row.brand==='Button Works').reviewUntil,rotated.find(row=>row.brand==='Button Works').reviewUntil,'cooldown must not extend on every run');
+const promotedRanks = planRanks.map(row=>({...row,collectionPosition:row.brand==='Button Works'?8:row.collectionPosition}));
+const promoted = toObjects(brandContext.buildBrandSeoWeeklyPlan_(promotedRanks,planQueries,planTech,plan,planNow));
+assert.equal(promoted.find(row=>row.brand==='Button Works').focusState,'維持');
+assert.equal(promoted.filter(row=>row.focusState==='集中').length,5);
+// A completed week is idempotent and cannot clear the prior register.
+brandContext.withScriptLock_ = (_name,fn)=>fn();
+brandContext.getDashboardSpreadsheet_ = ()=>({getSheetByName:()=>({getDataRange:()=>({getValues:()=>[planHeaders,...plan.map(row=>planHeaders.map(h=>row[h]))]})})});
+brandContext.brandSeoDecisionWeek_ = ()=>'2026-09-21';
+assert.equal(brandContext.writeBrandSeoActionPlanNow().status,'already_written');
 
 // Render the same KPI ahead of site-wide SEO values and retain escaped text.
 const elements = { content: {}, status: {}, sheetLink: {} };
