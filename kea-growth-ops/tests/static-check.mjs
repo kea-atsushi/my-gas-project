@@ -1278,6 +1278,8 @@ const trend = brandContext.brandRankFocusTrends_({ ...kpi, focusBrands: kpi.bran
 assert.equal(trend.seven.rankImprovement, 4, 'do not compare another alias, page, or collection run');
 assert.equal(trend.seven.status, '改善傾向');
 assert.equal(trend.seven.postChange, true);
+assert.equal(brandContext.brandRankCompare_(trendBase, trendBase, true, '2026-09-24').postChange, false, 'a later change must not claim earlier observations');
+assert.equal(brandContext.brandRankCompare_({ ...trendBase, windowStart: '2026-09-25' }, trendBase, true, '2026-09-24').postChange, true);
 assert.equal(trend.twentyEight.status, '比較不可');
 assert.equal(brandContext.brandRankCompare_({ ...trendBase, collectionImpressions: 1 }, trendBase, true).status, '少量・参考');
 assert.equal(brandContext.brandRankCompare_({ ...trendBase, collectionImpressions: 0 }, trendBase, true).status, '片期間未観測');
