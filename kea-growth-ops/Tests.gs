@@ -1262,12 +1262,31 @@ function runKeaGrowthUnitTests() {
     const lowSpend = buildAdFinding(98, 0, true);
     assertEqual_(lowSpend.level, '対応不要');
     assertTrue_(lowSpend.title.indexOf('経過観察') >= 0);
+    assertEqual_(buildAdFinding(999, 0, true).level, '対応不要');
+    assertEqual_(buildAdFinding(98, 0, false).level, '要確認');
 
     const reviewSpend = buildAdFinding(1000, 0, true);
     assertEqual_(reviewSpend.level, '要確認');
 
     const trackingMismatch = buildAdFinding(98, 1, true);
     assertEqual_(trackingMismatch.level, '要対応');
+  }, results);
+
+  test_('daily HTML only contains notification text while weekly keeps KPI metrics', function () {
+    const snapshot = {
+      shopifySales: 0, adCost: 107, roas: 0, cpa: null,
+      contributionProfit: null,
+    };
+    const report = '【要確認】新規の確認事項\n購入計測を確認 <test>';
+    const daily = reportToHtml_(report, snapshot, 'daily');
+    assertEqual_(daily.indexOf('<table'), -1);
+    assertTrue_(daily.indexOf('【要確認】新規の確認事項<br>') >= 0);
+    assertTrue_(daily.indexOf('&lt;test&gt;') >= 0);
+    const weekly = reportToHtml_(report, snapshot, 'weekly');
+    assertTrue_(weekly.indexOf('<table') >= 0);
+    assertTrue_(weekly.indexOf('売上') >= 0);
+    assertTrue_(weekly.indexOf('広告費') >= 0);
+    assertTrue_(weekly.indexOf('原価未取得') >= 0);
   }, results);
 
   test_('malformed Shopify response is not accepted as zero orders', function () {
