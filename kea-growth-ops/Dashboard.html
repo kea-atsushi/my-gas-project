@@ -368,6 +368,7 @@
         const indexedUrls = majorUrls.filter(item => item.indexed === true).length;
         const brandRankSummary = brandRank.available ? `
           <h3>主要KPI：ブランド名単体でブランドページTOP10</h3>
+          <p class="rec-copy"><strong>目標8/16</strong>：11月19日までに到達を狙い、12月17日までに安定。毎週月曜に集中・維持・再評価を判定します。</p>
           <div class="health-grid">
             ${healthItem('TOP10 / 全対象', `${brandRank.top10Count}/${brandRank.brandCount}（${(brandRank.top10Rate * 100).toFixed(1)}%）`)}
             ${healthItem('11〜20位', brandRank.nearTop10Count)}
@@ -380,6 +381,7 @@
           <p class="rec-copy">TOP10のうち少量で暫定：${escapeHtml((brandRank.lowSampleTop10 || []).map(item => `${item.brand}「${item.query}」${item.impressions}表示`).join(' / ') || 'なし')}</p>
           <p class="rec-copy"><strong>重点ブランド（優先対応）：</strong>${escapeHtml((brandRank.focusBrands || []).map(item => `${item.brand}: ${item.position == null ? '未観測' : `${item.position.toFixed(2)}位${item.lowSample ? '（暫定）' : ''}`}`).join(' / ') || '今回の取得対象なし')}</p>
           ${(brandRank.focusTrends || []).length ? `<h4>重点ブランドの前期間比較</h4>
+            ${(brandRank.weeklyPlan || []).filter(item => item.focusState === '集中' || item.focusState === '再評価').map(item => `<p class="metric-note">${escapeHtml(item.brand)}（${escapeHtml(item.focusState)}）：${escapeHtml(item.nextAction)}</p>`).join('')}
             <div class="rec-list">${brandRank.focusTrends.map(item => `<article class="rec">
               <p class="rec-target">${escapeHtml(item.brand)}「${escapeHtml(item.query || '未観測')}」</p>
               <div class="brand-trends">
