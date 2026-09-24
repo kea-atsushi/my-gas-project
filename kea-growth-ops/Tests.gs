@@ -1152,7 +1152,14 @@ function runKeaGrowthUnitTests() {
     }, [], {});
     assertEqual_(snapshot.shopifySales, 0);
     assertEqual_(snapshot.adCost, 0);
-    assertEqual_(findingCounts_(findings)['対応不要'], 2);
+    assertEqual_(findingCounts_(findings)['要対応'], 0);
+    assertEqual_(findingCounts_(findings)['要確認'], 0);
+    assertTrue_(findings.some(function (finding) {
+      return finding.key === 'shopify-zero-confirmed';
+    }));
+    assertTrue_(findings.some(function (finding) {
+      return finding.key === 'ads-zero-confirmed';
+    }));
 
     const failedShopify = {
       available: false,
@@ -1264,6 +1271,9 @@ function runKeaGrowthUnitTests() {
     assertTrue_(lowSpend.title.indexOf('経過観察') >= 0);
     assertEqual_(buildAdFinding(999, 0, true).level, '対応不要');
     assertEqual_(buildAdFinding(98, 0, false).level, '要確認');
+    assertEqual_(buildAdFinding(0, 0, true).level, '対応不要');
+    assertEqual_(buildAdFinding(0, 1, true).level, '要対応');
+    assertEqual_(buildAdFinding(0, 0, false).level, '要確認');
 
     const reviewSpend = buildAdFinding(1000, 0, true);
     assertEqual_(reviewSpend.level, '要確認');
@@ -1287,6 +1297,28 @@ function runKeaGrowthUnitTests() {
     assertTrue_(weekly.indexOf('売上') >= 0);
     assertTrue_(weekly.indexOf('広告費') >= 0);
     assertTrue_(weekly.indexOf('原価未取得') >= 0);
+  }, results);
+
+  test_('daily notifications only include newly active actionable findings', function () {
+    const originalRead = healthReadJsonProperty_;
+    const originalWrite = healthWriteJsonProperty_;
+    let keys = [];
+    try {
+      healthReadJsonProperty_ = function () { return keys; };
+      healthWriteJsonProperty_ = function (key, value) { keys = value; };
+      const observed = { level: '対応不要', key: 'observation' };
+      const review = { level: '要確認', key: 'purchase-tracking' };
+      assertEqual_(dailyFindingNotificationDelta_([observed]).length, 0);
+      assertEqual_(dailyFindingNotificationDelta_([observed, review]).length, 1);
+      assertEqual_(dailyFindingNotificationDelta_([observed, review]).length, 0);
+      const escalated = { level: '要対応', key: 'purchase-tracking' };
+      assertEqual_(dailyFindingNotificationDelta_([escalated]).length, 1);
+      assertEqual_(dailyFindingNotificationDelta_([]).length, 0);
+      assertEqual_(dailyFindingNotificationDelta_([review]).length, 1);
+    } finally {
+      healthReadJsonProperty_ = originalRead;
+      healthWriteJsonProperty_ = originalWrite;
+    }
   }, results);
 
   test_('malformed Shopify response is not accepted as zero orders', function () {
