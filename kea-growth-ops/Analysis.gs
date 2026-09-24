@@ -470,7 +470,7 @@ function buildDailyFindings_(snapshot, data, recommendations, health) {
   }
 
   if (
-    data.ads.available && Number(data.ads.summary.cost || 0) > 0 &&
+    data.ads.available &&
     Number(data.ads.summary.conversions || 0) <= 0
   ) {
     const adCost = Number(data.ads.summary.cost || 0);
@@ -490,8 +490,8 @@ function buildDailyFindings_(snapshot, data, recommendations, health) {
         'Google Ads',
         'ads-spend-zero-conversions',
         reviewLevel === '対応不要'
-          ? '広告費あり・購入CV 0（経過観察）'
-          : '広告費あり・購入CV 0',
+          ? '購入CV 0（経過観察）'
+          : '購入CV 0',
         shopifyOrders > 0
           ? 'Shopify注文があるのにGoogle Ads購入CVが0です。'
           : shopifyOrders === null
