@@ -148,6 +148,21 @@ function canonicalFromHtml_(html) {
   return href ? href[1] : '';
 }
 
+
+function normalizeCanonicalUrlForComparison_(url) {
+  return String(url || '')
+    .trim()
+    .replace(/%[0-9a-f]{2}/gi, function (value) {
+      return value.toUpperCase();
+    });
+}
+
+function canonicalUrlsMatch_(leftUrl, rightUrl) {
+  const left = normalizeCanonicalUrlForComparison_(leftUrl);
+  const right = normalizeCanonicalUrlForComparison_(rightUrl);
+  if (!left || !right) return null;
+  return left === right;
+}
 function inspectHttpUrl_(url) {
   const direct = UrlFetchApp.fetch(url, {
     method: 'get',
@@ -343,10 +358,7 @@ function seoMajorUrlResult_(config, url) {
     crawledAs: index.crawledAs || '',
     googleCanonical: googleCanonical,
     shopifyCanonical: shopifyCanonical,
-    canonicalMatches:
-      googleCanonical && shopifyCanonical
-        ? googleCanonical === shopifyCanonical
-        : null,
+    canonicalMatches: canonicalUrlsMatch_(googleCanonical, shopifyCanonical),
     httpStatus: http.status,
     finalHttpStatus: http.finalStatus,
     redirectLocation: http.location,
