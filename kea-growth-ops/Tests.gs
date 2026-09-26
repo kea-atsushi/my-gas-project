@@ -3,6 +3,22 @@ function runKeaGrowthUnitTests() {
   test_('safeDivide zero denominator', function () {
     assertEqual_(safeDivide_(100, 0), 0);
   }, results);
+  test_('canonical comparison ignores percent-encoding hex case', function () {
+    const googleCanonical =
+      'https://store.kea.co.jp/products/%E3%83%99%E3%83%AD%E3%82%A2%E3%82%AD%E3%83%A3%E3%83%9F%E3%82%BD%E3%83%BC%E3%83%AB';
+    const shopifyCanonical =
+      'https://store.kea.co.jp/products/%e3%83%99%e3%83%ad%e3%82%a2%e3%82%ad%e3%83%a3%e3%83%9f%e3%82%bd%e3%83%bc%e3%83%ab';
+    assertEqual_(
+      normalizeCanonicalUrlForComparison_(shopifyCanonical),
+      googleCanonical,
+    );
+    assertEqual_(canonicalUrlsMatch_(googleCanonical, shopifyCanonical), true);
+    assertEqual_(
+      canonicalUrlsMatch_(googleCanonical, googleCanonical + '-different'),
+      false,
+    );
+    assertEqual_(canonicalUrlsMatch_('', shopifyCanonical), null);
+  }, results);
   test_('zero conversions make CPA unavailable', function () {
     const snapshot = buildGrowthSnapshot_(
       new Date('2026-07-30T00:00:00.000Z'),
