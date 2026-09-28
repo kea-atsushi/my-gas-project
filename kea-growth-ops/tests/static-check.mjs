@@ -1380,7 +1380,7 @@ const planRanks = planBrands.map(brand => ({ checkedAt: planNow.toISOString(), w
   brandQuery: brand, collectionUrl: 'https://example.test/' + brand,
   collectionImpressions: ['Button Works', 'Oblada', 'SEA', 'SINME', 'BATONER', 'Agapantha Jewelry'].includes(brand) ? 30 : 0,
   collectionPosition: ({'Button Works':11.5,Oblada:14.7,SEA:32.75,SINME:8,BATONER:1,'Agapantha Jewelry':9.5})[brand] || 0,
-  productCount: ({ COEL:47,'77circa':12, mikomori:8 })[brand] || 1, gscRowsComplete: true }));
+  productCount: ({ Oblada:131, SEA:44, COEL:47,'77circa':12,"LEVI'S":8, mikomori:8,'Button Works':2 })[brand] || 1, gscRowsComplete: true }));
 const planQueries = planRanks.flatMap(row => ['last_7d','previous_7d'].map(window => ({ ...row, window,
   axis:'ブランド名単体', query:row.brand, windowStart:'2026-09-15', windowEnd:'2026-09-21' })));
 const planTech = planRanks.map(row => ({...row,indexed:true,canonicalMatches:true,
@@ -1388,7 +1388,7 @@ const planTech = planRanks.map(row => ({...row,indexed:true,canonicalMatches:tru
 const planHeaders = brandContext.KEA_BRAND_SEO_ACTION_HEADERS_;
 const toObjects = rows => rows.map(row => Object.fromEntries(planHeaders.map((h,i) => [h,row[i]])));
 const plan = toObjects(brandContext.buildBrandSeoWeeklyPlan_(planRanks,planQueries,planTech,[],planNow));
-assert.deepEqual(plan.filter(row=>row.focusState==='集中').map(row=>row.brand).sort(), ['77circa','Button Works','COEL','Oblada','SEA']);
+assert.deepEqual(plan.filter(row=>row.focusState==='集中').map(row=>row.brand).sort(), ['77circa','COEL',"LEVI'S",'Oblada','SEA']);
 assert.equal(plan.find(row=>row.brand==='COEL').weekPosition,'');
 assert.equal(plan.find(row=>row.brand==='COEL').weekTop10,'未観測');
 assert.equal(plan.find(row=>row.brand==='SINME').focusState,'維持');
@@ -1398,12 +1398,12 @@ assert.throws(()=>brandContext.buildBrandSeoWeeklyPlan_(planRanks,planQueries,pl
 const rotatedNow = new Date('2026-10-19T09:00:00Z');
 const atRotated = rows => rows.map(row=>({...row,checkedAt:rotatedNow.toISOString()}));
 const rotated = toObjects(brandContext.buildBrandSeoWeeklyPlan_(atRotated(planRanks),atRotated(planQueries),atRotated(planTech),plan,rotatedNow));
-assert.equal(rotated.find(row=>row.brand==='Button Works').focusState,'再評価');
+assert.equal(rotated.find(row=>row.brand==='Oblada').focusState,'再評価');
 assert.ok(rotated.some(row=>row.brand==='mikomori' && row.focusState==='集中'));
 const nextNow = new Date('2026-10-26T09:00:00Z');
 const nextStamp = rows => rows.map(row=>({...row,checkedAt:nextNow.toISOString()}));
 const stillCooling = toObjects(brandContext.buildBrandSeoWeeklyPlan_(nextStamp(planRanks),nextStamp(planQueries),nextStamp(planTech),[...plan,...rotated],nextNow));
-assert.equal(stillCooling.find(row=>row.brand==='Button Works').reviewUntil,rotated.find(row=>row.brand==='Button Works').reviewUntil,'cooldown must not extend on every run');
+assert.equal(stillCooling.find(row=>row.brand==='Oblada').reviewUntil,rotated.find(row=>row.brand==='Oblada').reviewUntil,'cooldown must not extend on every run');
 const promotedRanks = planRanks.map(row=>({...row,collectionPosition:row.brand==='Button Works'?8:row.collectionPosition}));
 const promoted = toObjects(brandContext.buildBrandSeoWeeklyPlan_(promotedRanks,planQueries,planTech,plan,planNow));
 assert.equal(promoted.find(row=>row.brand==='Button Works').focusState,'維持');

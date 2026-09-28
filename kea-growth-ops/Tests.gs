@@ -3,6 +3,37 @@ function runKeaGrowthUnitTests() {
   test_('safeDivide zero denominator', function () {
     assertEqual_(safeDivide_(100, 0), 0);
   }, results);
+  test_('brand SEO focus prioritizes published assortment with technical and TOP10 safeguards', function () {
+    const now = new Date('2026-09-28T01:00:00Z');
+    const counts = {Oblada:131,SEA:44,'77circa':12,"LEVI'S":8,mikomori:8,
+      COEL:47,SINME:31,BATONER:23,'Agapantha Jewelry':4,'Button Works':2,Velnica:6};
+    const positions = {Oblada:14.85,SEA:32.75,'Button Works':10.83,Velnica:24,
+      COEL:3,SINME:8.08,BATONER:1,'Agapantha Jewelry':9};
+    const ranks = KEA_BRAND_RANK_TARGET_BRANDS_.map(function (brand) {
+      return {checkedAt:now,window:'last_28d',brand:brand,brandQuery:brand,
+        collectionUrl:'https://example.test/' + encodeURIComponent(brand),
+        collectionImpressions:positions[brand] ? 20 : 0,
+        collectionPosition:positions[brand] || 0,productCount:counts[brand] || 1,gscRowsComplete:true};
+    });
+    const queries = ranks.reduce(function (rows, rank) {
+      return rows.concat(['last_7d','previous_7d'].map(function (window) {
+        return Object.assign({}, rank, {window:window,axis:'ブランド名単体',query:rank.brand,
+          windowStart:'2026-09-19',windowEnd:'2026-09-25'});
+      }));
+    }, []);
+    const tech = ranks.map(function (rank) {
+      return Object.assign({}, rank, {indexed:true,canonicalMatches:true,
+        indexingState:'INDEXING_ALLOWED',robotsTxtState:'ALLOWED',httpStatus:200});
+    });
+    const plan = buildBrandSeoWeeklyPlan_(ranks, queries, tech, [], now);
+    const focus = plan.filter(function (row) { return row[27] === '集中'; });
+    assertEqual_(focus.map(function (row) { return row[1]; }).sort().join('|'),
+      ['Oblada','SEA','77circa',"LEVI'S",'mikomori'].sort().join('|'));
+    assertEqual_(plan.filter(function (row) { return row[27] === '維持'; }).length, 4);
+    tech.filter(function (row) { return row.brand === 'Button Works'; })[0].indexed = false;
+    const technicalPlan = buildBrandSeoWeeklyPlan_(ranks, queries, tech, [], now);
+    assertEqual_(technicalPlan.filter(function (row) { return row[1] === 'Button Works'; })[0][27], '集中');
+  }, results);
   test_('canonical comparison ignores percent-encoding hex case', function () {
     const googleCanonical =
       'https://store.kea.co.jp/products/%E3%83%99%E3%83%AD%E3%82%A2%E3%82%AD%E3%83%A3%E3%83%9F%E3%82%BD%E3%83%BC%E3%83%AB';
