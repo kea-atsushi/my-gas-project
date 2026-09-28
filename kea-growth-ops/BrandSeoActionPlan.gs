@@ -104,13 +104,12 @@ function buildBrandSeoWeeklyPlan_(rankRows, queryRows, techRows, history, now) {
   var candidates = items.filter(function (item) { return !item.top10 && !item.cooling; });
   candidates.sort(function (a, b) {
     var group = function (item) {
-      if (!item.techOk) return 0;
       return item.priority[0] === 'A' ? 1 : item.priority[0] === 'B' ? 2 : 3;
     };
-    var highCompetition = function (item) { return ['LEVI\'S', 'Chloé', 'SUICOKE'].indexOf(item.brand) >= 0 ? 1 : 0; };
-    return group(a) - group(b) || highCompetition(a) - highCompetition(b) ||
-      (group(a) < 3 ? (a.position || 999) - (b.position || 999) :
-        Number(b.rank.productCount || 0) - Number(a.rank.productCount || 0)) ||
+    // 2026-09-28: published assortment takes precedence over observed rank.
+    return Number(a.techOk) - Number(b.techOk) ||
+      Number(b.rank.productCount || 0) - Number(a.rank.productCount || 0) ||
+      group(a) - group(b) || (a.position || 999) - (b.position || 999) ||
       String(a.brand).localeCompare(String(b.brand));
   });
   var focus = candidates.slice(0, 5).map(function (item) { return item.brand; });
@@ -122,7 +121,7 @@ function buildBrandSeoWeeklyPlan_(rankRows, queryRows, techRows, history, now) {
       state === '集中' && !item.techOk ? '技術状態を最優先で確認し、対象URLの不具合だけ修正' :
       state === '集中' && item.age >= 14 ? '2週間経過。競合・検索意図・再クロールを再評価し、同じ修正を繰り返さない' :
       state === '集中' ? '再クロール後の同一語・同一URLの週次推移を確認。未観測は需要ゼロと判断しない' :
-      '集中枠が空いた時にA→B→Cの順で再選定';
+      '公開商品数が多いブランドを優先して再選定。同数はA→B→C・順位順。技術異常は先に確認';
     var initial = day === '2026-09-24' && KEA_BRAND_RANK_FOCUS_BRANDS_.indexOf(item.brand) >= 0;
     var changed = initial ? 'HOME本文からブランドへリンク追加' +
       (['Button Works', 'COEL', '77circa'].indexOf(item.brand) >= 0 ? '。title・H1・descriptionに公式日本語名を補完' : '') :
