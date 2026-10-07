@@ -42,6 +42,7 @@ function runKeaGrowthUnitTests() {
         previous28Rank:null,current28Impressions:0,previous28Impressions:0};
     });
     assertEqual_(brandRankEvaluateAlerts_(rows).length,0);
+    rows.forEach(function(x){x.current28Rank=20;x.previous28Rank=20;x.current28Impressions=20;x.previous28Impressions=20;});
     rows[0].current7Rank=9; rows[0].previous7Rank=12;
     rows[0].current7Impressions=15; rows[0].previous7Impressions=15;
     rows[0].current28Rank=9; rows[0].current28Impressions=20;
