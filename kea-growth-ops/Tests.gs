@@ -34,6 +34,36 @@ function runKeaGrowthUnitTests() {
     const technicalPlan = buildBrandSeoWeeklyPlan_(ranks, queries, tech, [], now);
     assertEqual_(technicalPlan.filter(function (row) { return row[1] === 'Button Works'; })[0][27], '集中');
   }, results);
+
+  test_('brand rank alerts notify significant observed changes only', function () {
+    const rows = KEA_BRAND_RANK_TARGET_BRANDS_.map(function (brand) {
+      return {brand:brand,current7Rank:null,previous7Rank:null,current7Impressions:0,
+        previous7Impressions:0,current7Ctr:0,previous7Ctr:0,current28Rank:null,
+        previous28Rank:null,current28Impressions:0,previous28Impressions:0};
+    });
+    assertEqual_(brandRankEvaluateAlerts_(rows).length,0);
+    rows.forEach(function(x){x.current28Rank=20;x.previous28Rank=20;x.current28Impressions=20;x.previous28Impressions=20;});
+    rows[0].current7Rank=9; rows[0].previous7Rank=12;
+    rows[0].current7Impressions=15; rows[0].previous7Impressions=15;
+    rows[0].current28Rank=9; rows[0].current28Impressions=20;
+    rows[0].previous28Rank=12; rows[0].previous28Impressions=20;
+    let alerts=brandRankEvaluateAlerts_(rows);
+    assertTrue_(alerts.some(function(x){return x.key==='brandRank|'+rows[0].brand+'|TOP10_ENTER';}));
+    rows[0].current7Rank=null;
+    assertEqual_(brandRankEvaluateAlerts_(rows).length,0);
+    rows[0].current7Rank=17; rows[0].previous7Rank=11;
+    rows[0].current7Impressions=20; rows[0].previous7Impressions=20;
+    alerts=brandRankEvaluateAlerts_(rows);
+    assertTrue_(alerts.some(function(x){return x.key==='brandRank|'+rows[0].brand+'|MAJOR_DOWN';}));
+    rows[0].current7Rank=15; rows[0].previous7Rank=10;
+    alerts=brandRankEvaluateAlerts_(rows);
+    assertTrue_(alerts.some(function(x){return x.key==='brandRank|'+rows[0].brand+'|TOP10_EXIT';}));
+    for(let i=1;i<8;i++){rows[i].current28Rank=8;rows[i].current28Impressions=20;
+      rows[i].previous28Rank=8;rows[i].previous28Impressions=20;}
+    alerts=brandRankEvaluateAlerts_(rows);
+    assertTrue_(alerts.some(function(x){return x.key==='brandRank|GOAL|達成';}));
+  }, results);
+
   test_('canonical comparison ignores percent-encoding hex case', function () {
     const googleCanonical =
       'https://store.kea.co.jp/products/%E3%83%99%E3%83%AD%E3%82%A2%E3%82%AD%E3%83%A3%E3%83%9F%E3%82%BD%E3%83%BC%E3%83%AB';

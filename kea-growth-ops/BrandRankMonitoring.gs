@@ -735,6 +735,140 @@ function brandRankEntryTech_(config, entry, oldEcByTarget) {
   ];
 }
 
+
+/** Sparse brand-rank alerts. Missing GSC observations never mean a TOP10 exit. */
+function brandRankEvaluateAlerts_(items) {
+  const goal = 8, threshold = 5, minImpressions = 10;
+  const pos = function (v) {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v); return isFinite(n) && n > 0 ? n : null;
+  };
+  const goalState = function (prefix) {
+    let top = 0, unknown = Math.max(0, 16 - items.length);
+    items.forEach(function (x) {
+      const p = pos(x[prefix + '28Rank']), imp = Number(x[prefix + '28Impressions'] || 0);
+      if (p === null || imp <= 0) unknown++;
+      else if (p <= 10) top++;
+    });
+    return {top:top, unknown:unknown,
+      status:top >= goal ? '達成' : top + unknown < goal ? '未達' : '判定保留'};
+  };
+  const out = [];
+  items.forEach(function (x) {
+    const cur=pos(x.current7Rank), prev=pos(x.previous7Rank);
+    if (cur === null || prev === null) return;
+    const enter=prev > 10 && cur <= 10, drop=prev <= 10 && cur > 10;
+    const delta=prev-cur;
+    const major=!enter && !drop &&
+      Number(x.current7Impressions || 0)>=minImpressions &&
+      Number(x.previous7Impressions || 0)>=minImpressions && Math.abs(delta)>=threshold;
+    if (!enter && !drop && !major) return;
+    const type=enter?'TOP10入り':drop?'TOP10脱落':delta>0?'大幅上昇':'大幅下落';
+    const code=enter?'TOP10_ENTER':drop?'TOP10_EXIT':delta>0?'MAJOR_UP':'MAJOR_DOWN';
+    const causes=[];
+    if (x.currentStock != null && x.previousStock != null &&
+        Number(x.currentStock)!==Number(x.previousStock)) {
+      causes.push('公開在庫あり商品数 '+x.previousStock+'→'+x.currentStock+'（因果未確定）');
+    }
+    const ci=Number(x.current7Impressions||0), pi=Number(x.previous7Impressions||0);
+    if (pi>0 && ci<=pi*0.7) causes.push('表示回数減少（需要・表示機会を確認）');
+    const cc=Number(x.current7Ctr||0), pc=Number(x.previous7Ctr||0);
+    if (pc-cc>=0.02) causes.push('CTRが2ポイント以上低下');
+    (x.techIssues||[]).forEach(function(v){causes.push(v);});
+    if (!causes.length) causes.push('明確な同時変化なし。競合・検索需要も確認対象');
+    const now28=goalState('current');
+    out.push({
+      key:'brandRank|'+x.brand+'|'+code, level:'要確認',
+      title:x.brand+' '+type+'（'+prev.toFixed(1)+'位→'+cur.toFixed(1)+'位）',
+      cause:'要因候補（因果未確定）: '+causes.join(' / '),
+      evidence:'同一ブランド名クエリ×コレクション / 直近7日 表示 '+pi+'→'+ci+
+        '、CTR '+(pc*100).toFixed(2)+'%→'+(cc*100).toFixed(2)+
+        '% / 直近28日 TOP10 '+now28.top+'/16（目標8）'+
+        ((ci<minImpressions||pi<minImpressions)?' / 低サンプル・暫定':''),
+      action:'GSCのクエリ×ページ、在庫、URL検査（登録・canonical・HTTP）を確認',
+    });
+  });
+  const now=goalState('current'), prior=goalState('previous');
+  if(now.status!=='判定保留' && prior.status!=='判定保留' && now.status!==prior.status) {
+    out.push({
+      key:'brandRank|GOAL|'+now.status, level:'要確認',
+      title:'ブランド名単体TOP10目標が'+now.status+'へ変化',
+      cause:'TOP10 '+prior.top+'→'+now.top+'ブランド（16中）。未観測は圏外とせず除外',
+      evidence:'直近28日とその前28日の比較 / 目標8ブランド以上 / 未観測 '+prior.unknown+'→'+now.unknown,
+      action:'BrandSEOQueriesで対象クエリ・表示回数・コレクションページを確認',
+    });
+  }
+  return out;
+}
+
+function brandRankAlertTechIssues_(row) {
+  if (!row) return [];
+  const bad=function(v){return v===false||String(v).toLowerCase()==='false';};
+  const issues=[];
+  if(bad(row.indexed)) issues.push('技術確認: Google未登録');
+  if(bad(row.canonicalMatches)) issues.push('技術確認: canonical不一致');
+  const http=Number(row.finalHttpStatus||row.httpStatus||0);
+  if(http && http!==200) issues.push('技術確認: HTTP '+http);
+  if(bad(row.descriptionPresent)) issues.push('技術確認: description未設定');
+  if(bad(row.bodyPresent)) issues.push('技術確認: コレクション本文なし');
+  if(bad(row.collectionRuleOk)) issues.push('技術確認: コレクション条件');
+  if(/block|disallow|denied/i.test(String(row.robotsTxtState||''))) issues.push('技術確認: robots制限');
+  return issues;
+}
+
+/** Reads only the existing daily GSC/Shopify snapshots; no external calls or writes. */
+function buildBrandRankAlertFindings_() {
+  try {
+    const ss=getDashboardSpreadsheet_();
+    const read=function(name){
+      const sh=ss.getSheetByName(name); if(!sh||sh.getLastRow()<2)return [];
+      const v=sh.getDataRange().getValues(), h=v.shift()||[];
+      return v.map(function(r){return rowObject_(h,r);});
+    };
+    const all=read(KEA_BRAND_RANK_SUMMARY_SHEET_).filter(function(r){return r.window==='last_28d';});
+    const times=all.map(function(r){return new Date(r.checkedAt).getTime();})
+      .filter(function(t){return isFinite(t)&&t>0;});
+    const latest=Math.max.apply(null,times);
+    if(!latest||dateKey_(new Date(latest))!==dateKey_(new Date()))return [];
+    const current={};
+    all.filter(function(r){return new Date(r.checkedAt).getTime()===latest;})
+      .forEach(function(r){current[r.brand]=r;});
+    if(KEA_BRAND_RANK_TARGET_BRANDS_.some(function(b){
+      const r=current[b];return !r||!(r.gscRowsComplete===true||r.gscRowsComplete==='TRUE');
+    }))return [];
+    const priorTimes=times.filter(function(t){return t<latest;});
+    const priorAt=priorTimes.length?Math.max.apply(null,priorTimes):0, prior={};
+    if(priorAt)all.filter(function(r){return new Date(r.checkedAt).getTime()===priorAt;})
+      .forEach(function(r){prior[r.brand]=r;});
+    const queries=read(KEA_BRAND_RANK_QUERY_SHEET_), tech=read(KEA_BRAND_RANK_TECH_SHEET_), techBy={};
+    tech.forEach(function(r){techBy[r.brand]=r;});
+    const metric=function(brand,q,url,window){
+      const r=queries.filter(function(x){return new Date(x.checkedAt).getTime()===latest&&
+        x.brand===brand&&x.axis==='ブランド名単体'&&x.window===window&&
+        x.collectionUrl===url&&brandRankNormalizeQuery_(x.query)===brandRankNormalizeQuery_(q);
+      })[0];
+      if(!r||!(r.gscRowsComplete===true||r.gscRowsComplete==='TRUE'))return null;
+      const imp=Number(r.collectionImpressions||0), p=Number(r.collectionPosition||0);
+      return {rank:imp>0&&p>0?p:null,impressions:imp,ctr:Number(r.collectionCtr||0)};
+    };
+    const rows=KEA_BRAND_RANK_TARGET_BRANDS_.map(function(brand){
+      const r=current[brand], q=String(r.brandQuery||''), url=String(r.collectionUrl||'');
+      const a=metric(brand,q,url,'last_7d'), b=metric(brand,q,url,'previous_7d');
+      const c=metric(brand,q,url,'last_28d'), d=metric(brand,q,url,'previous_28d');
+      if(!a||!b||!c||!d)return null;
+      const old=prior[brand]||{};
+      return {brand:brand,query:q,current7Rank:a.rank,previous7Rank:b.rank,
+        current7Impressions:a.impressions,previous7Impressions:b.impressions,
+        current7Ctr:a.ctr,previous7Ctr:b.ctr,current28Rank:c.rank,
+        current28Impressions:c.impressions,previous28Rank:d.rank,
+        previous28Impressions:d.impressions,currentStock:r.inStockProductCount,
+        previousStock:old.inStockProductCount,techIssues:brandRankAlertTechIssues_(techBy[brand])};
+    });
+    if(rows.some(function(r){return !r;}))return [];
+    return brandRankEvaluateAlerts_(rows);
+  }catch(e){console.error('Brand rank alert evaluation skipped: '+String(e.message||e));return [];}
+}
+
 function brandRankRun_(manual) {
   const token = brandRankAcquireLease_();
   if (!token) return { status: 'skipped', reason: 'brand rank monitor already active' };
