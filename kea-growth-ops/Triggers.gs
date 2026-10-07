@@ -118,7 +118,9 @@ function runDailyGrowthReport(force) {
         recommendations,
         health,
       );
-      const notificationFindings = dailyFindingNotificationDelta_(findings);
+      const notificationFindings = dailyFindingNotificationDelta_(
+        findings.concat(buildBrandRankAlertFindings_()),
+      );
       const notificationReport = notificationFindings.length
         ? buildDecisionSummary_(notificationFindings)
         : '';
